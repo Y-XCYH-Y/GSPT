@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Boolean, JSON, Text, ForeignKey, Enum
+from sqlalchemy import Column, JSON, Integer, String, Float, DateTime, Date, Boolean, JSON, Text, ForeignKey, Enum
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -87,7 +87,8 @@ class Project(Base):
     start_date = Column(Date)
     planned_end_date = Column(Date)
     actual_end_date = Column(Date)
-    planned_man_days = Column(Float, default=0)  # 计划人天
+    planned_man_days = Column(Float, default=0)  # 基本工天（用于计算计划工天）
+    drawing_list = Column(JSON, default=list)  # 图名清单 [{name, area, personnel, remark}]
     actual_man_days = Column(Float, default=0)   # 实际人天
     alert_level = Column(Enum(AlertLevel), default=AlertLevel.GREEN)
     description = Column(Text)
@@ -161,20 +162,6 @@ class QualityAssessment(Base):
     comments = Column(Text)
     assessed_at = Column(DateTime, default=datetime.utcnow)
 
-# 对话记录
-class Conversation(Base):
-    __tablename__ = "conversations"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    query = Column(Text, nullable=False)
-    response = Column(Text)
-    skill_used = Column(String(100))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    user = relationship("User")
-
-# 历史工作量统计
 class WorkloadHistory(Base):
     __tablename__ = "workload_history"
     

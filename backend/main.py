@@ -24,7 +24,6 @@ import auth
 
 from database import engine, get_db
 
-from skills import SkillEngine
 
 from import_export import generate_template, import_from_excel, export_to_excel
 
@@ -90,6 +89,11 @@ async def lifespan(app: FastAPI):
             db.commit()
 
             print("提示: 已添加 current_stage 列")
+        if "drawing_list" not in cols2:
+            db.execute(text("ALTER TABLE projects ADD COLUMN drawing_list TEXT DEFAULT '[]'"))
+            db.commit()
+            print("提示: 已添加 drawing_list 列")
+
 
     except Exception as e:
 
@@ -134,6 +138,12 @@ async def lifespan(app: FastAPI):
 
 
 
+
+    try:
+        sync_result = crud.sync_all_projects_to_workload(db)
+        print(f"项目库同步完成: {sync_result}")
+    except Exception as e:
+        print(f"项目库同步失败: {e}")
 
     yield
 
@@ -315,6 +325,28 @@ def get_current_user_info(current_user: models.User = Depends(auth.get_current_u
 
     return resp
 
+@app.put("/api/user/update-account")
+def update_my_account(
+    data: schemas.UpdateAccountRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    if not auth.verify_password(data.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="当前密码错误")
+    new_username = (data.new_username or "").strip()
+    if new_username and new_username != current_user.username:
+        exists = db.query(models.User).filter(models.User.username == new_username).first()
+        if exists:
+            raise HTTPException(status_code=400, detail="用户名已存在")
+        current_user.username = new_username
+    if data.new_password:
+        current_user.password_hash = auth.get_password_hash(data.new_password)
+    db.commit()
+    db.refresh(current_user)
+    return {"message": "修改成功", "username": current_user.username}
+
+
+
 @app.get("/api/users", response_model=list[schemas.UserResponse])
 
 def get_users(
@@ -464,6 +496,15 @@ def get_projects(
     return projects
 
 
+
+
+
+@app.post("/api/projects/sync-library")
+def sync_projects_to_library(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_role(["director"]))
+):
+    return crud.sync_all_projects_to_workload(db)
 
 
 
@@ -879,6 +920,59 @@ def update_project_member(
 
 
 
+
+
+@app.put("/api/projects/{project_id}/end-date")
+def update_project_end_date(project_id: int, data: dict, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    proj = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not proj:
+        raise HTTPException(404, detail="项目不存在")
+    role = auth.get_user_role(current_user)
+    if role != "director" and proj.project_leader_id != current_user.id:
+        raise HTTPException(403, detail="仅所长或项目负责人可操作")
+    from datetime import datetime as _dt
+    end_date = data.get("planned_end_date")
+    if end_date:
+        try:
+            proj.planned_end_date = _dt.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+        except Exception:
+            proj.planned_end_date = None
+    db.commit()
+    crud.sync_project_to_workload(db, proj)
+    db.commit()
+    return {"message": "预计完成时间已更新", "planned_end_date": proj.planned_end_date}
+
+
+
+@app.post("/api/projects/{project_id}/start")
+def start_project(project_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    proj = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not proj:
+        raise HTTPException(404, detail="项目不存在")
+    role = auth.get_user_role(current_user)
+    if role != "director" and proj.project_leader_id != current_user.id:
+        raise HTTPException(403, detail="仅所长或项目负责人可操作")
+    proj.status = "in_progress"
+    db.commit()
+    crud.sync_project_to_workload(db, proj)
+    db.commit()
+    return {"message": "项目已开始", "status": proj.status}
+
+
+@app.post("/api/projects/{project_id}/stop")
+def stop_project(project_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    proj = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not proj:
+        raise HTTPException(404, detail="项目不存在")
+    role = auth.get_user_role(current_user)
+    if role != "director" and proj.project_leader_id != current_user.id:
+        raise HTTPException(403, detail="仅所长或项目负责人可操作")
+    proj.status = "stopped"
+    db.commit()
+    crud.sync_project_to_workload(db, proj)
+    db.commit()
+    return {"message": "项目已暂停", "status": proj.status}
+
 @app.post("/api/projects/{project_id}/complete")
 def complete_project(project_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
     proj = db.query(models.Project).filter(models.Project.id == project_id).first()
@@ -891,12 +985,7 @@ def complete_project(project_id: int, db: Session = Depends(get_db), current_use
     from datetime import date
     proj.actual_end_date = date.today()
     db.commit()
-    crud._sync_project_to_workload(db, {
-        "project_code": proj.project_code or "",
-        "project_name": proj.project_name,
-        "project_type": proj.project_type or "",
-        "current_stage": proj.current_stage or ""
-    }, current_user.id)
+    crud.sync_project_to_workload(db, proj)
     db.commit()
     return {"message": "项目已完成", "status": proj.status}
 
@@ -934,6 +1023,8 @@ def update_project_status(
 
     proj.status = new_status
 
+    db.commit()
+    crud.sync_project_to_workload(db, proj)
     db.commit()
 
     return {"message": "项目状态已更新"}
@@ -1146,124 +1237,6 @@ def sync_employee_skills(
 
 
 
-# ============ 对话交互 ============
-
-
-
-@app.post("/api/chat")
-
-def chat(
-
-    request: schemas.ChatRequest,
-
-    db: Session = Depends(get_db),
-
-    current_user: models.User = Depends(auth.get_current_user)
-
-):
-
-    """模拟对话引擎，实际应接入私有化大模型"""
-
-    query = request.query
-
-    engine = SkillEngine(db)
-
-    
-
-    # 简单的意图识别（实际应用应接入大模型）
-
-    response_text = ""
-
-    data = None
-
-    
-
-    if "工作量评估" in query or "人天" in query:
-
-        # 提取关键词
-
-        response_text = "已为您进行工作量评估，请提供项目类型、面积和阶段信息获取更准确的结果。"
-
-    elif "分配" in query or "人员" in query:
-
-        projects = crud.get_projects(db)
-
-        if projects:
-
-            result = engine.assign_personnel(projects[0].id)
-
-            response_text = f"已分析当前人员负荷，为您推荐最佳分配方案。共找到{result['total_candidates']}名候选人。"
-
-            data = result
-
-    elif "统计" in query or "负荷" in query:
-
-        result = engine.workload_statistics()
-
-        response_text = f"当前全所总计划人天: {result['total_planned_man_days']}，实际投入: {result['total_actual_man_days']}，偏差: {result['overall_deviation']}人天。"
-
-        data = result
-
-    elif "预警" in query or "延期" in query:
-
-        result = engine.check_progress_alerts()
-
-        response_text = f"当前红色预警{result['summary']['red_count']}个，黄色预警{result['summary']['yellow_count']}个，绿色正常{result['summary']['green_count']}个。"
-
-        data = result
-
-    elif "调配" in query or "资源" in query:
-
-        result = engine.resource_allocation_suggestion()
-
-        response_text = f"当前活跃项目{result['total_active_projects']}个，过载人员{len(result['overloaded_personnel'])}人，可用人员{len(result['available_personnel'])}人。"
-
-        data = result
-
-    elif "复盘" in query:
-
-        response_text = "请指定要复盘的项目ID，我将为您生成详细的项目复盘报告。"
-
-    elif "质量" in query:
-
-        response_text = "请指定要评定的项目ID，我将按标准进行质量等级评定。"
-
-    else:
-
-        response_text = f"收到您的需求：「{query}」。作为生产调度助手，我可以帮您进行工作量评估、人员分配、进度跟踪、资源调配、统计分析、项目复盘和质量评定。请告诉我您具体需要哪方面的帮助？"
-
-    
-
-    # 保存对话记录
-
-    conversation = models.Conversation(
-
-        user_id=current_user.id,
-
-        query=query,
-
-        response=response_text
-
-    )
-
-    db.add(conversation)
-
-    db.commit()
-
-    
-
-    return schemas.ChatResponse(
-
-        response=response_text,
-
-        skill_used=request.skill,
-
-        data=data
-
-    )
-
-
-
 # ============ 知识库管理 ============
 
 
@@ -1415,8 +1388,6 @@ def get_constants():
     return {
 
         "project_types": ["站房","枢纽","大铁","轨交","民建","改造","援外","BIM","方案","建筑","咨询","总包"],
-
-        "position_levels": ["一级总体","二级总体","一级设计人","二级设计人","三级设计人"],
 
         "professions": ["建筑","结构","给排水","暖通","电气","规划","景观","室内","概预算"],
 
@@ -1814,6 +1785,21 @@ async def import_workload(
 
 
 
+@app.get("/api/workload-records/template/download")
+def download_workload_template(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_role(["director"]))
+):
+    from import_export import generate_workload_template
+    output = generate_workload_template()
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=workload_template.xlsx"}
+    )
+
+
+
 @app.get("/api/workload-records/export")
 
 def export_workload(
@@ -1825,6 +1811,36 @@ def export_workload(
 ):
 
     records = crud.get_workload_records(db)
+    projects = db.query(models.Project).all()
+    project_by_code = {}
+    project_by_name = {}
+    for p in projects:
+        if p.project_code and p.project_code.strip():
+            project_by_code[p.project_code.strip()] = p
+        if p.project_name and p.project_name.strip():
+            project_by_name[p.project_name.strip()] = p
+    member_rows = db.query(models.ProjectMember).all()
+    members_by_project = {}
+    for m in member_rows:
+        members_by_project.setdefault(m.project_id, []).append(m)
+
+    def member_names(project, roles):
+        names = []
+        seen = set()
+        for m in members_by_project.get(project.id, []):
+            if m.role in roles and m.employee_name and m.employee_name not in seen:
+                seen.add(m.employee_name)
+                names.append(m.employee_name)
+        return "、".join(names)
+
+    def find_project(r):
+        if r.project_code and r.project_code.strip() in project_by_code:
+            return project_by_code[r.project_code.strip()]
+        if r.project_name and r.project_name.strip() in project_by_name:
+            return project_by_name[r.project_name.strip()]
+        return None
+
+    columns = ["项目编号", "项目类型", "规模", "阶段", "开始日期", "预计结束", "计划工天", "项目负责人", "设计", "复核", "专业负责人", "院审", "总体审核", "集团审核"]
 
     import pandas as pd
 
@@ -1833,18 +1849,28 @@ def export_workload(
     data = []
 
     for r in records:
-
+        p = find_project(r)
+        scale = r.scale or ""
+        if not scale and p and p.area:
+            scale = ("%g" % p.area) + "㎡"
         data.append({
-
-            "project_code": r.project_code,
-
-            "project_name": r.project_name,
-
-            "project_type": r.project_type,
-
+            "项目编号": r.project_code or "",
+            "项目类型": p.project_type if p and p.project_type else (r.project_type or ""),
+            "规模": scale,
+            "阶段": p.current_stage if p and p.current_stage else (r.stage or ""),
+            "开始日期": p.start_date.strftime("%Y-%m-%d") if p and p.start_date else "",
+            "预计结束": p.planned_end_date.strftime("%Y-%m-%d") if p and p.planned_end_date else "",
+            "计划工天": p.planned_man_days if p and p.planned_man_days else (r.calculated_work_days or ""),
+            "项目负责人": member_names(p, {"项目负责人"}) if p else (r.overall_lead or ""),
+            "设计": member_names(p, {"设计", "设计阶段"}) if p else "",
+            "复核": member_names(p, {"复核", "复核阶段"}) if p else "",
+            "专业负责人": member_names(p, {"专业负责人", "专业审核"}) if p else "",
+            "院审": member_names(p, {"院审"}) if p else "",
+            "总体审核": member_names(p, {"总体审核"}) if p else "",
+            "集团审核": member_names(p, {"集团审核"}) if p else "",
         })
 
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(data, columns=columns)
 
     output = BytesIO()
 
@@ -1891,22 +1917,6 @@ def create_quality_standard(
 ):
 
     return crud.create_quality_standard(db, data)
-
-
-
-@app.get("/api/knowledge-base/conversations")
-
-def get_conversations(
-
-    db: Session = Depends(get_db),
-
-    current_user: models.User = Depends(auth.get_current_user)
-
-):
-
-    return db.query(models.Conversation).order_by(models.Conversation.created_at.desc()).limit(50).all()
-
-
 
 
 
@@ -2168,7 +2178,7 @@ def get_performance_employees(
 
         "id": e.id, "name": e.name, "employee_id": e.employee_id,
 
-        "profession": e.profession, "position_level": e.position_level
+        "profession": e.profession
 
     } for e in employees]
 
@@ -2408,7 +2418,7 @@ def get_results(
 
     db: Session = Depends(get_db),
 
-    current_user: models.User = Depends(auth.get_current_user)
+    current_user: models.User = Depends(auth.require_role(["director", "deputy_director"]))
 
 ):
 

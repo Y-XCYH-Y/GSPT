@@ -24,7 +24,7 @@
         <div v-else class="pa-empty">暂无项目信息</div>
       </div>
 
-      <div v-if="activeTab==='approval'" class="pa-panel"><div class="pa-panel-head">待审批的工天修改申请</div><div v-if="workdayRequests.length" class="pa-scroll"><table class="pa-table"><thead><tr><th>申请人</th><th>项目</th><th>基本工天</th><th>阶段比例</th><th>复杂程度</th><th>质量系数</th><th>进展系数</th><th>修正系数</th><th>状态</th><th v-if="authStore.isDirector">操作</th></tr></thead><tbody><tr v-for="r in workdayRequests" :key="r.id"><td>{{ r.user_name }}</td><td>{{ r.project_name }}</td><td>{{ r.A }}</td><td>{{ r.B }}</td><td>{{ r.C }}</td><td>{{ r.D }}</td><td>{{ r.E }}</td><td>{{ r.F }}</td><td><span :class="'badge-' + r.status">{{ {"pending":"待审批","approved":"已通过","rejected":"已拒绝"}[r.status] || r.status }}</span></td><td v-if="authStore.isDirector && r.status==='pending'"><button class="btn btn-sm btn-success" @click="approveRequest(r)">批准</button><button class="btn btn-sm btn-danger" @click="rejectRequest(r)">拒绝</button></td></tr></tbody></table></div><div v-else class="pa-empty">暂无待审批的申请</div></div><div v-if="activeTab==='scoring'" class="pa-panel">
+      <div v-if="activeTab==='scoring'" class="pa-panel">
         <div class="pa-panel-head">项目工天</div>
         <!-- 工天统计摘要 -->
         <div v-if="myProjects.length" class="stats-summary">
@@ -62,8 +62,8 @@
                 <td><strong>{{ (calcStageRatio(p.stage, p.project_type) * 100).toFixed(1) }}%</strong><br><span style="font-size:10px;color:#94a3b8">{{ p.stage || "方案设计" }}</span></td>
                 <td>
                   <select v-model.number="p.C" class="input score-input" @change="calcG(p)" :disabled="!p.can_edit">
-                    <option value="0.8">简单 0.8</option><option value="1.0">一般 1.0</option>
-                    <option value="1.1">复杂新型 1.1</option><option value="1.3">特别复杂 1.3</option>
+                    <option :value="0.8">简单 0.8</option><option :value="1.0">一般 1.0</option>
+                    <option :value="1.1">复杂新型 1.1</option><option :value="1.3">特别复杂 1.3</option>
                   </select>
                 </td>
                 <td><input v-model.number="p.D" type="number" step="0.05" min="0.8" max="1.2" class="input score-input" @input="calcG(p)" :disabled="!p.can_edit" /></td>
@@ -76,7 +76,7 @@
                     <span v-else-if="p.hasPendingRequest" style="color:#f59e0b">修改</span>
                     <span v-else>申请</span>
                   </button>
-                <button v-if="authStore.isDirector || authStore.user?.id === p.project_leader_id" class="btn btn-sm btn-outline" @click="openAllocDialog(p)" style="margin-left:4px">分配</button>
+                
                 </td>
               </tr>
             </tbody>
@@ -86,8 +86,36 @@
         <div v-else class="pa-empty">暂无项目信息</div>
       </div>
 
-      <div v-if="activeTab==='eval'" class="pa-panel">
-        <div class="pa-panel-head">考核评分</div>
+      <div v-if="activeTab==='score'" class="pa-panel">
+        <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid #e2e8f0">
+          <button class="pa-tab" :class="{active:scoreSubTab==='project'}" @click="switchScoreSubTab('project')">项目评分</button>
+          <button v-if="canViewEvalScoring" class="pa-tab" :class="{active:scoreSubTab==='eval'}" @click="switchScoreSubTab('eval')">考核</button>
+        </div>
+        <div v-if="scoreSubTab==='project'">
+        <div class="pa-panel-head">项目评分</div>
+        <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select v-model="scoreProjectId" class="input" style="width:auto" @change="changeScoreProject">
+            <option value="">选择项目</option>
+            <option v-for="p in scoreProjects" :key="p.id" :value="p.id">{{ p.project_name }}</option>
+          </select>
+          <button class="btn btn-primary btn-sm" @click="loadProjectScoreMembers">加载人员</button><button class="btn btn-outline btn-sm" @click="openScoreAlloc()">分配</button>
+        </div>
+        <div v-if="scoreProjectMembers.length" class="pa-scroll">
+          <table class="pa-table">
+            <thead><tr><th>工号</th><th>姓名</th><th>角色</th><th>评分</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="m in scoreProjectMembers" :key="m.id">
+                <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.displayRole || m.role }}</td>
+                <td><input v-model.number="m.score" type="number" min="0" max="100" class="input score-input" @input="clampProjectScore(m)" /></td>
+                <td><button class="btn btn-primary btn-sm" @click="saveProjectScore(m)">保存</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="pa-empty">选择项目后加载人员</div>
+        </div>
+        <div v-if="canViewEvalScoring && scoreSubTab==='eval'">
+        <div class="pa-panel-head">考核</div>
         <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select v-model="evalAssessmentId" class="input" style="width:auto">
             <option value="">-- 选择考核期 --</option>
@@ -107,19 +135,19 @@
             <tr v-for="t in scoreTargets" :key="t.id">
               <td>{{ t.name }}</td>
               <td>
-                <input v-if="evalRole==='director'" v-model.number="t.score" type="number" min="0" max="100" class="input score-input" style="width:60px;font-size:11px;padding:3px" placeholder="0-100" />
+                <input v-if="evalRole==='director'" v-model.number="t.score" type="number" min="0" max="100" class="input score-input" style="width:60px;font-size:11px;padding:3px" placeholder="0-100" @input="clampEvalScore(t)" />
                 <span v-else>{{ t.directorScore !== null && t.directorScore !== undefined ? t.directorScore.toFixed(1) : "-" }}</span>
               </td>
               <td>
-                <input v-if="evalRole==='deputy_director'" v-model.number="t.score" type="number" min="0" max="100" class="input score-input" style="width:60px;font-size:11px;padding:3px" placeholder="0-100" />
+                <input v-if="evalRole==='deputy_director'" v-model.number="t.score" type="number" min="0" max="100" class="input score-input" style="width:60px;font-size:11px;padding:3px" placeholder="0-100" @input="clampEvalScore(t)" />
                 <span v-else>{{ t.deputyScore !== null && t.deputyScore !== undefined ? t.deputyScore.toFixed(1) : "-" }}</span>
               </td>
               <td>
-                <input v-if="evalRole==='project_leader'" v-model.number="t.score" type="number" min="0" max="100" class="input score-input" style="width:60px;font-size:11px;padding:3px" placeholder="0-100" />
+                <input v-if="evalRole==='project_leader'" v-model.number="t.score" type="number" min="0" max="100" class="input score-input" style="width:60px;font-size:11px;padding:3px" placeholder="0-100" @input="clampEvalScore(t)" />
                 <span v-else>{{ t.leaderScore !== null && t.leaderScore !== undefined ? t.leaderScore.toFixed(1) : "-" }}</span>
               </td>
               <td>
-                <input v-if="evalRole==='peer'" v-model.number="t.score" type="number" min="0" max="100" class="input score-input" style="width:60px;font-size:11px;padding:3px" placeholder="0-100" />
+                <input v-if="evalRole==='peer'" v-model.number="t.score" type="number" min="0" max="100" class="input score-input" style="width:60px;font-size:11px;padding:3px" placeholder="0-100" @input="clampEvalScore(t)" />
                 <span v-else>{{ t.peerScore !== null && t.peerScore !== undefined ? t.peerScore.toFixed(1) : "-" }}</span>
               </td>
               <td><button class="btn btn-primary btn-sm" @click="submitEvalScore(t)" :disabled="loading || t.score === null || t.score === undefined">提交</button></td>
@@ -128,6 +156,7 @@
         </table>
       </div>
         <div v-else class="pa-empty">点击"加载待评人员"加载待评人员列表</div>
+        </div>
       </div>
 
       <div v-if="activeTab==='result'" class="pa-panel">
@@ -142,7 +171,7 @@
         </div>
         <div v-if="results.length" class="pa-scroll" style="max-height:500px">
           <table class="pa-table">
-            <thead><tr><th>排名</th><th>姓名</th><th>专业</th><th>工天</th><th>所长30%</th><th>副所长20%</th><th>项目负责人30%</th><th>互评20%</th><th>综合得分</th></tr></thead>
+            <thead><tr><th>排名</th><th>姓名</th><th>专业</th><th>工天</th><th>所长</th><th>副所长</th><th>项目负责人</th><th>互评</th><th>综合得分</th></tr></thead>
             <tbody>
               <tr v-for="(r, idx) in results" :key="r.id">
                 <td>{{ idx + 1 }}</td><td>{{ r.user_name }}</td><td>{{ r.profession || "-" }}</td>
@@ -160,6 +189,20 @@
 
     </div>
   </div>
+<!-- 项目评分对话框 -->
+<div v-if="showProjectScoreDialog" class="score-overlay" @click.self="showProjectScoreDialog = false">
+  <div class="score-dialog card">
+    <h4 style="margin:0 0 12px">考评打分 - {{ scoreTarget?.employee_name }}</h4>
+    <div style="font-size:12px;color:#64748b;margin-bottom:12px">角色：{{ scoreTarget?.displayRole || scoreTarget?.role || "—" }}</div>
+    <div class="form-row"><label>综合评分 (0-100)</label><input v-model.number="scoreData.score" type="number" min="0" max="100" placeholder="0-100" @input="clampDialogScore()" /></div>
+    <div class="form-row"><label>备注</label><textarea v-model="scoreData.comment" rows="3" placeholder="可选" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:13px" /></div>
+    <div class="form-actions">
+      <button class="btn btn-primary" @click="saveProjectScore2" :disabled="!scoreData.score && scoreData.score !== 0">保存</button>
+      <button class="btn btn-outline" @click="showProjectScoreDialog = false">取消</button>
+    </div>
+  </div>
+</div>
+
 <!-- 工天分配对话框 -->
 <div v-if="showAllocDialog" class="alloc-overlay">
   <div class="alloc-dialog card">
@@ -279,10 +322,9 @@ const tabs = computed(() => {
   const items = [
     { key: "myproj", label: "我的项目" },
     { key: "scoring", label: "项目工天" },
-    { key: "approval", label: authStore.isDirector ? "待审批" : "我的申请" },
-    { key: "eval", label: "考核评分" },
-    { key: "result", label: "考核结果" },
   ]
+  if (canViewScoreTab.value) items.push({ key: "score", label: "评分" })
+  if (authStore.isDirector || authStore.isDeputyDirector) items.push({ key: "result", label: "考核结果" })
   return items
 })
 
@@ -331,6 +373,7 @@ async function loadAssessments() {
 loadAssessments()
 
 function switchTab(key) {
+  showAllocDialog.value = false
   activeTab.value = key
   if (key === "myproj") loadMyProj()
   if (key === "scoring") {
@@ -339,13 +382,12 @@ function switchTab(key) {
       loadScores()
     }
   }
-  if (key === "eval") {
-    if (assessments.value.length) {
-      if (!evalAssessmentId.value) evalAssessmentId.value = assessments.value[0].id
-      loadScoreTargets()
-    }
-  }
+if (key === "score") {
+  if (!canViewScoreTab.value) return
+  loadScoreProjects()
+}
   if (key === "result") {
+    if (!authStore.isDirector && !authStore.isDeputyDirector) return
     if (assessments.value.length) {
       if (!resultAssessmentId.value) resultAssessmentId.value = assessments.value[0].id
       loadResults()
@@ -355,26 +397,10 @@ function switchTab(key) {
 
 async function loadMyProj() {
   try { myProjects.value = (await performanceAPI.getMyProjects()).data } catch(e) { console.error(e) }
+  loadScoreProjects()
 }
 loadMyProj()
 
-const workdayRequests = ref([])
-async function loadWorkdayRequests() {
-  try { workdayRequests.value = (await api.get("/performance/workday-requests")).data } catch(e) {}
-}
-loadWorkdayRequests()
-
-async function approveRequest(r) {
-  await api.put("/performance/workday-requests/" + r.id + "/approve", { comment: "" })
-  await loadWorkdayRequests()
-}
-
-async function rejectRequest(r) {
-  var c = prompt("说明拒绝原因：")
-  if (c === null) return
-  await api.put("/performance/workday-requests/" + r.id + "/reject", { comment: c || "" })
-  await loadWorkdayRequests()
-}
 
 async function createAssessment() {
   loading.value = true
@@ -401,8 +427,8 @@ async function loadScores() {
     r.data.forEach(s => { saved[s.project_name] = s })
     myProjects.value.forEach(p => {
       const s = saved[p.project_name]
-      if (s) { p.A = s.A; p.B = calcStageRatio(p.stage, p.project_type); p.C = s.C; p.D = s.D; p.E = s.E; p.F = s.F; p.G = Math.round(s.G); p.savedId = s.id }
-      else { p.A = p.A || 1; p.B = calcStageRatio(p.stage, p.project_type); p.C = p.C || 1; p.D = p.D || 1; p.E = p.E || 1; p.F = p.F || 1; p.savedId = undefined; calcG(p) }
+      if (s) { p.A = Number(s.A); p.B = calcStageRatio(p.stage, p.project_type); p.C = Number(s.C); p.D = Number(s.D); p.E = Number(s.E); p.F = Number(s.F); p.G = Math.round(Number(s.G)); p.savedId = s.id }
+      else { p.A = Number(p.A || 1); p.B = calcStageRatio(p.stage, p.project_type); p.C = Number(p.C || 1); p.D = Number(p.D || 1); p.E = Number(p.E || 1); p.F = Number(p.F || 1); p.savedId = undefined; calcG(p) }
     })
     // Load workday requests to check pending status
     const reqs = (await api.get("/performance/workday-requests")).data
@@ -413,7 +439,7 @@ async function loadScores() {
 }
 
 function allocStageRatio(stage) {
-  var ratios = { "方案设计": 0.05, "初步设计": 0.36, "施工图": 0.30, "后期服务": 0.38 }
+  var ratios = { "方案设计": 0.05, "初步设计": 0.36, "施工图": 0.30, "施工配合": 0.38 }
   return ratios[stage] || 0
 }
 
@@ -421,15 +447,15 @@ function calcStageRatio(stage, projectType) {
   if (!stage) stage = "方案设计"
   var isRailway = projectType === "大铁"
   var ratios = isRailway
-    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "后期服务": 0.077 }
-    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "后期服务": 0.077 }
+    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "施工配合": 0.077 }
+    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "施工配合": 0.077 }
   return ratios[stage] || 0
 }
 
 function calcG(p) {
   var s = p.stage || "方案设计"
   var b = calcStageRatio(s, p.project_type)
-  p.G = (p.A || 0) * b * (p.C || 1) * (p.D || 1) * (p.E || 1) * (p.F || 1)
+  p.G = Math.round((p.A || 0) * b * (p.C || 1) * (p.D || 1) * (p.E || 1) * (p.F || 1))
 }
 
 function calcStats() {
@@ -456,7 +482,7 @@ async function saveScore(p) {
       D: p.D || 1, E: p.E || 1, F: p.F || 1
     })
     p.hasPendingRequest = true
-    alert("已提交审批申请，等待所长批准"); loadWorkdayRequests()
+    alert("已提交审批申请，等待所长批准")
     return
   }
   loading.value = true
@@ -477,6 +503,185 @@ async function deleteScore(p) {
   loading.value = true
   try { if (p.savedId) await performanceAPI.deleteWorkday(p.savedId); await loadScores() } catch(e) { console.error(e) }
   loading.value = false
+}
+
+const scoreSubTab = ref("project")
+const canViewEvalScoring = computed(() => authStore.isDirector || authStore.isDeputyDirector)
+
+function switchScoreSubTab(tab) {
+  showAllocDialog.value = false
+  scoreSubTab.value = tab
+  if (tab === 'eval') {
+    if (!canViewEvalScoring.value) return
+    if (assessments.value.length && !evalAssessmentId.value) evalAssessmentId.value = assessments.value[0].id
+    loadScoreTargets()
+  }
+}
+const scoreProjects = ref([])
+const scoreProjectId = ref("")
+const scoreProjectMembers = ref([])
+const canViewScoreTab = computed(() => {
+  if (authStore.isDirector || authStore.isDeputyDirector) return true
+  var uid = authStore.user?.id
+  return myProjects.value.some(function(p) { return p.project_leader_id === uid }) ||
+    scoreProjects.value.some(function(p) { return p.project_leader_id === uid })
+})
+
+async function loadScoreProjects() {
+  try {
+    const r = await api.get("/projects")
+    scoreProjects.value = r.data
+    if (scoreProjects.value.length && !scoreProjectId.value) {
+      scoreProjectId.value = scoreProjects.value[0].id
+      loadProjectScoreMembers()
+    }
+  } catch(e) { console.error(e) }
+}
+
+const scoreDesignMems = computed(() => scoreProjectMembers.value.filter(m => m.role === "设计" || m.role === "设计阶段"))
+const scoreReviewMems = computed(() => scoreProjectMembers.value.filter(m => m.role === "复核" || m.role === "复核阶段"))
+const scoreOtherMems = computed(() => scoreProjectMembers.value.filter(m => m.role !== "设计" && m.role !== "设计阶段" && m.role !== "复核" && m.role !== "复核阶段"))
+
+const showProjectScoreDialog = ref(false)
+const scoreTarget = ref(null)
+const scoreData = ref({ score: null, comment: "" })
+const scoreMap = ref({})
+
+function clampScoreValue(v) {
+  if (v === "" || v === null || v === undefined) return null
+  return Math.max(0, Math.min(100, Number(v) || 0))
+}
+
+function clampProjectScore(m) {
+  if (m) m.score = clampScoreValue(m.score)
+}
+
+function clampEvalScore(t) {
+  if (t) t.score = clampScoreValue(t.score)
+}
+
+function clampDialogScore() {
+  scoreData.value.score = clampScoreValue(scoreData.value.score)
+}
+
+function isScoreValid(v) {
+  return v !== null && v !== undefined && v >= 0 && v <= 100
+}
+
+function scoreMemberValue(m) {
+  var key = (m.employee_id || "") + "|" + (m.role || "")
+  var s = scoreMap.value[key]
+  if (!s) return ""
+  return (s.score !== null && s.score !== undefined) ? s.score : ""
+}
+
+function openProjectScoreDialog(m) {
+  var key = (m.employee_id || "") + "|" + (m.role || "")
+  var s = scoreMap.value[key]
+  scoreTarget.value = m
+  scoreData.value = { score: (s && s.score !== null && s.score !== undefined) ? s.score : null, comment: (s && s.comment) || "" }
+  showProjectScoreDialog.value = true
+}
+
+async function saveProjectScore2() {
+  if (!scoreTarget.value || !scoreProjectId.value) return
+  if (!isScoreValid(scoreData.value.score)) {
+    alert("评分必须在0-100之间")
+    return
+  }
+  try {
+    await api.post("/projects/" + scoreProjectId.value + "/member-scores", {
+      target_employee_id: scoreTarget.value.employee_id,
+      role: scoreTarget.value.role,
+      score: scoreData.value.score,
+      comment: scoreData.value.comment || ""
+    })
+    var key = (scoreTarget.value.employee_id || "") + "|" + (scoreTarget.value.role || "")
+    scoreMap.value[key] = {
+      target_employee_id: scoreTarget.value.employee_id,
+      role: scoreTarget.value.role,
+      score: scoreData.value.score,
+      comment: scoreData.value.comment || ""
+    }
+    var savedRow = scoreProjectMembers.value.find(function(m) {
+      return (m.employee_id || "") === (scoreTarget.value.employee_id || "") && (m.role || "") === (scoreTarget.value.role || "")
+    })
+    if (savedRow) savedRow.score = scoreData.value.score
+    showProjectScoreDialog.value = false
+    showAllocDialog.value = false
+    alert("评分已保存")
+  } catch(e) { alert("保存失败") }
+}
+
+function changeScoreProject() {
+  showProjectScoreDialog.value = false
+  showAllocDialog.value = false
+  scoreProjectMembers.value = []
+  loadProjectScoreMembers()
+}
+
+async function loadProjectScoreMembers() {
+  if (!scoreProjectId.value) return
+  try {
+    const r = await api.get("/projects/" + scoreProjectId.value + "/members")
+    scoreProjectMembers.value = r.data.filter(m => m.role !== "项目负责人").map(m => ({
+      ...m,
+      score: null,
+      displayRole: m.role === "专业审核" ? "专业负责人" : m.role
+    }))
+    const sr = await api.get("/projects/" + scoreProjectId.value + "/member-scores")
+    sr.data.forEach(s => {
+      const m = scoreProjectMembers.value.find(x => x.employee_id === s.target_employee_id && x.role === s.role)
+      if (m) m.score = s.score
+    })
+    scoreProjectMembers.value.forEach(function(m) {
+      var key = (m.employee_id || "") + "|" + (m.role || "")
+      var s = scoreMap.value[key]
+      if (s && (m.score === null || m.score === undefined)) m.score = s.score
+    })
+  } catch(e) { console.error(e) }
+}
+
+function canManageSelectedProject() {
+  if (!scoreProjectId.value) return false
+  var p = scoreProjects.value.find(function(x) { return x.id === scoreProjectId.value })
+  if (!p) return false
+  return authStore.isDirector || authStore.user?.id === p.project_leader_id
+}
+
+function openScoreAlloc() {
+  if (!scoreProjectId.value) { alert("请先选择项目"); return }
+  var p = scoreProjects.value.find(function(x) { return x.id === scoreProjectId.value })
+  if (!p) return
+  var stage = p.current_stage || "方案设计"
+  var b = calcStageRatio(stage, p.project_type)
+  p.G = Math.round((p.planned_man_days || 0) * b)
+  openAllocDialog(p)
+}
+
+async function saveProjectScore(m) {
+  if (!scoreProjectId.value || m.score === null || m.score === undefined) return
+  if (!isScoreValid(m.score)) {
+    alert("评分必须在0-100之间")
+    return
+  }
+  try {
+    await api.post("/projects/" + scoreProjectId.value + "/member-scores", {
+      target_employee_id: m.employee_id,
+      role: m.role,
+      score: m.score
+    })
+    var key = (m.employee_id || "") + "|" + (m.role || "")
+    scoreMap.value[key] = {
+      target_employee_id: m.employee_id,
+      role: m.role,
+      score: m.score,
+      comment: m.comment || ""
+    }
+    showProjectScoreDialog.value = false
+    showAllocDialog.value = false
+    alert("评分已保存")
+  } catch(e) { alert("保存失败") }
 }
 
 async function loadScoreTargets() {
@@ -514,6 +719,10 @@ async function loadScoreTargets() {
 
 async function submitEvalScore(t) {
   if (!evalAssessmentId.value || !evalRole.value || t.score === null || t.score === undefined) return
+  if (!isScoreValid(t.score)) {
+    alert("评分必须在0-100之间")
+    return
+  }
   loading.value = true
   try {
     await performanceAPI.submitScore({
@@ -686,7 +895,7 @@ const stageData = computed(() => [
   { name: "方案设计", pct: 0.05 },
   { name: "初步设计", pct: 0.36 },
   { name: "施工图", pct: 0.30 },
-  { name: "后期服务", pct: 0.38 },
+  { name: "施工配合", pct: 0.38 },
 ])
 
 async function openAllocDialog(p) {
@@ -786,6 +995,15 @@ function unlockAlloc() {
 .pa-table th { background: #f8fafc; font-weight: 600; color: #475569; white-space: nowrap; }
 .pa-table tr:hover { background: #f1f5f9; }
 .badge-blue { background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+.ps-sec { margin-bottom: 14px; }
+.ps-sec h5 { margin: 0 0 6px; font-size: 14px; color: #334155; }
+.sec-count { font-size: 11px; color: #94a3b8; font-weight: normal; }
+.score-badge { display: inline-block; background: #dbeafe; color: #1d4ed8; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-right: 6px; }
+.score-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.45); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+.score-dialog { background: #fff; border-radius: 8px; padding: 20px; width: 420px; max-width: 100%; max-height: 90vh; overflow-y: auto; }
+.score-dialog .form-row { margin-bottom: 12px; }
+.score-dialog label { display: block; font-size: 13px; color: #475569; margin-bottom: 4px; }
+.score-dialog input[type="number"] { width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 10px; font-size: 13px; outline: none; }
 .pa-empty { color: #94a3b8; text-align: center; padding: 30px; font-size: 14px; }
 .score-input { width: 70px !important; padding: 4px 6px !important; font-size: 12px !important; text-align: center; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }

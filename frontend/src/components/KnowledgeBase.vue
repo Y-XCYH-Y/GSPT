@@ -53,57 +53,33 @@
       <div v-if="wlImportResult" class="kb-import-result" :class="'result-' + (wlImportResult.type || 'info')"><pre>{{ wlImportResult.msg }}</pre></div>
       <div class="wl-scroll" v-if="filteredWorkloads.length">
       <table class="kb-table">
-        <thead><tr><th style="width:28px"></th><th>项目编号</th><th>项目名称</th><th>类型</th><th>计算工天</th><th>阶段</th><th>年份</th><th>操作</th></tr></thead>
+        <thead><tr><th style="width:28px"></th><th>项目编号</th><th>项目名称</th><th>类型</th><th>计划工天</th><th>阶段</th><th>年份</th><th>操作</th></tr></thead>
         <tbody>
           <template v-for="w in filteredWorkloads" :key="w.id">
-            <tr v-if="editingWlId !== w.id" class="wl-row" @click="toggleWlExpand(w.id)">
+            <tr class="wl-row" @click="toggleWlExpand(w.id)">
               <td><span class="expand-icon">{{ expandedWl[w.id] ? "&#x25BC;" : "&#x25B6;" }}</span></td>
               <td>{{ w.project_code || "-" }}</td><td>{{ w.project_name || "-" }}</td>
               <td><span class="badge-blue">{{ w.project_type || "-" }}</span></td>
-              <td>{{ w.calculated_work_days || "-" }}</td><td>{{ w.stage || "-" }}</td><td>{{ w.year || "-" }}</td>
-              <td><button class="btn btn-sm btn-outline" @click.stop="startWlEdit(w)">编辑</button><button class="btn btn-sm btn-danger" @click.stop="handleWlDelete(w.id)" style="margin-left:4px">删除</button></td>
+              <td>{{ w.planned_work_days !== undefined && w.planned_work_days !== null ? w.planned_work_days : w.calculated_work_days || "-" }}</td><td>{{ w.stage || "-" }}</td><td>{{ w.year || "-" }}</td>
+              <td><button class="btn btn-sm btn-danger" @click.stop="handleWlDelete(w.id)">删除</button></td>
             </tr>
-            <tr v-if="expandedWl[w.id] && editingWlId !== w.id" class="wl-detail-row">
+            <tr v-if="expandedWl[w.id]" class="wl-detail-row">
               <td colspan="8" style="padding:10px 14px;background:#f8fafc">
                 <div class="wl-detail-grid">
+                  <div><span class="dl">项目编号</span><span class="dv">{{ w.project_code || "-" }}</span></div>
+                  <div><span class="dl">项目类型</span><span class="dv">{{ w.project_type || "-" }}</span></div>
                   <div><span class="dl">规模</span><span class="dv">{{ w.scale || "-" }}</span></div>
-                  <div><span class="dl">总体/专册</span><span class="dv">{{ w.overall_lead || "-" }}</span></div>
-                  <div><span class="dl">建筑专册</span><span class="dv">{{ w.architecture_lead || "-" }}</span></div>
-                  <div><span class="dl">参与人员</span><span class="dv">{{ w.participants || "-" }}</span></div>
-                  <div><span class="dl">具体工作</span><span class="dv">{{ w.specific_work || "-" }}</span></div>
-                  <div><span class="dl">实际-建筑</span><span class="dv">{{ w.actual_work_days_architecture || "-" }}</span></div>
-                  <div><span class="dl">实际-结构</span><span class="dv">{{ w.actual_work_days_structure || "-" }}</span></div>
-                  <div><span class="dl">实际-其他</span><span class="dv">{{ w.actual_work_days_other || "-" }}</span></div>
-                  <div><span class="dl">实际工期</span><span class="dv">{{ w.actual_duration_days || "-" }}</span></div>
-                  <div><span class="dl">质量等级</span><span class="dv">{{ w.quality_grade || "-" }}</span></div>
-                  <div><span class="dl">备注</span><span class="dv">{{ w.remark || "-" }}</span></div>
-                </div>
-              </td>
-            </tr>
-            <tr v-if="editingWlId === w.id">
-              <td colspan="8" style="padding:12px;background:#f0f7ff">
-                <div class="wl-edit-grid">
-                  <label>项目编号 <input v-model="editWlForm.project_code" class="input input-sm" /></label>
-                  <label>项目名称 <input v-model="editWlForm.project_name" class="input input-sm" /></label>
-                  <label>类型 <input v-model="editWlForm.project_type" class="input input-sm" /></label>
-                  <label>规模 <input v-model="editWlForm.scale" class="input input-sm" /></label>
-                  <label>总体/专册 <input v-model="editWlForm.overall_lead" class="input input-sm" /></label>
-                  <label>建筑专册 <input v-model="editWlForm.architecture_lead" class="input input-sm" /></label>
-                  <label>计算工天 <input v-model.number="editWlForm.calculated_work_days" type="number" class="input input-sm" /></label>
-                  <label>阶段 <input v-model="editWlForm.stage" class="input input-sm" /></label>
-                  <label>参与人员 <input v-model="editWlForm.participants" class="input input-sm" /></label>
-                  <label>具体工作 <input v-model="editWlForm.specific_work" class="input input-sm" /></label>
-                  <label>实际工天-建筑 <input v-model.number="editWlForm.actual_work_days_architecture" type="number" class="input input-sm" /></label>
-                  <label>实际工天-结构 <input v-model.number="editWlForm.actual_work_days_structure" type="number" class="input input-sm" /></label>
-                  <label>实际工天-其他 <input v-model.number="editWlForm.actual_work_days_other" type="number" class="input input-sm" /></label>
-                  <label>实际工期(天) <input v-model.number="editWlForm.actual_duration_days" type="number" class="input input-sm" /></label>
-                  <label>质量等级 <input v-model="editWlForm.quality_grade" class="input input-sm" /></label>
-                  <label>年份 <input v-model="editWlForm.year" class="input input-sm" /></label>
-                  <label>备注 <input v-model="editWlForm.remark" class="input input-sm" /></label>
-                </div>
-                <div style="margin-top:8px;display:flex;gap:8px">
-                  <button class="btn btn-sm btn-primary" @click="handleWlUpdate">保存</button>
-                  <button class="btn btn-sm btn-outline" @click="editingWlId = null">取消</button>
+                  <div><span class="dl">阶段</span><span class="dv">{{ w.stage || "-" }}</span></div>
+                  <div><span class="dl">开始日期</span><span class="dv">{{ w.start_date || "-" }}</span></div>
+                  <div><span class="dl">预计结束</span><span class="dv">{{ w.planned_end_date || "-" }}</span></div>
+                  <div><span class="dl">计划工天</span><span class="dv">{{ w.planned_work_days !== undefined && w.planned_work_days !== null ? w.planned_work_days : w.calculated_work_days || "-" }}</span></div>
+                  <div><span class="dl">项目负责人</span><span class="dv">{{ w.leader_names || w.overall_lead || "-" }}</span></div>
+                  <div><span class="dl">设计</span><span class="dv">{{ w.design_names || "-" }}</span></div>
+                  <div><span class="dl">复核</span><span class="dv">{{ w.review_names || "-" }}</span></div>
+                  <div><span class="dl">专业负责人</span><span class="dv">{{ w.prolead_names || "-" }}</span></div>
+                  <div><span class="dl">院审</span><span class="dv">{{ w.yuan_names || "-" }}</span></div>
+                  <div><span class="dl">总体审核</span><span class="dv">{{ w.total_names || "-" }}</span></div>
+                  <div><span class="dl">集团审核</span><span class="dv">{{ w.group_names || "-" }}</span></div>
                 </div>
               </td>
             </tr>
@@ -127,7 +103,7 @@
           <div class="kb-item-body">
             <span>类型：{{ p.project_type }}</span>
             <span>面积：{{ p.area }}&#x33A1;</span>
-            <span>计划人天：{{ p.planned_man_days }}</span>
+            <span>计划工天：{{ calcPlannedWorkdays(p) }}</span>
             <span v-if="p.memberCount">成员：{{ p.memberCount }}人</span>
           </div>
         </div>
@@ -139,7 +115,7 @@
 
 
 <script setup>
-import { ref, computed, onMounted, reactive } from "vue"
+import { ref, computed, onMounted } from "vue"
 import { useEmployeeStore } from "../stores/employees"
 import { storeToRefs } from "pinia"
 import api from "../api"
@@ -149,8 +125,16 @@ const employeeStore = useEmployeeStore()
 const { employees } = storeToRefs(employeeStore)
 const workloads = ref([])
 const activeProjects = ref([])
-const editingWlId = ref(null)
-const editWlForm = reactive({})
+
+function calcPlannedWorkdays(p) {
+  var stage = p.stage || p.current_stage || "方案设计"
+  var type = p.project_type
+  var ratios = type === "大铁"
+    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "施工配合": 0.077 }
+    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "施工配合": 0.077 }
+  var b = ratios[stage] || 0
+  return Math.round((p.planned_man_days || 0) * b)
+}
 const wlSearchQuery = ref("")
 const expandedWl = ref({})
 
@@ -179,20 +163,61 @@ const authH = { Authorization: "Bearer " + tk }
 
 onMounted(async () => {
   try {
+    try { await api.post("/projects/sync-library") } catch(e) { console.error("sync library error:", e) }
     const [wlRes, projRes] = await Promise.all([
       api.get("/workload-records"),
       api.get("/projects")
     ])
-    workloads.value = wlRes.data
-    activeProjects.value = (projRes.data || []).filter(p => 
+    const allProjects = projRes.data || []
+    const projByCode = {}
+    const projByName = {}
+    for (let p of allProjects) {
+      if (p.project_code && p.project_code.trim()) projByCode[p.project_code.trim()] = p
+      if (p.project_name && p.project_name.trim()) projByName[p.project_name.trim()] = p
+    }
+    const memberResults = await Promise.allSettled(allProjects.map(p => api.get("/projects/" + p.id + "/members")))
+    const membersByProject = {}
+    memberResults.forEach((res, idx) => {
+      if (res.status === "fulfilled") membersByProject[allProjects[idx].id] = res.value.data || []
+    })
+    function memberNames(members, roles) {
+      const names = []
+      const seen = {}
+      for (const m of members || []) {
+        if (roles.includes(m.role) && m.employee_name && !seen[m.employee_name]) {
+          seen[m.employee_name] = 1
+          names.push(m.employee_name)
+        }
+      }
+      return names.join("、")
+    }
+    workloads.value = (wlRes.data || []).map(w => {
+      const p = (w.project_code && projByCode[w.project_code.trim()]) || (w.project_name && projByName[w.project_name.trim()])
+      const members = membersByProject[p ? p.id : null] || []
+      return {
+        ...w,
+        planned_work_days: p && p.planned_man_days != null ? p.planned_man_days : undefined,
+        project_type: (p && p.project_type) || w.project_type,
+        stage: (p && (p.current_stage || p.stage)) || w.stage,
+        project_name: (p && p.project_name) || w.project_name,
+        project_code: w.project_code,
+        start_date: p && p.start_date ? p.start_date : "",
+        planned_end_date: p && p.planned_end_date ? p.planned_end_date : "",
+        leader_names: memberNames(members, ["项目负责人"]),
+        design_names: memberNames(members, ["设计", "设计阶段"]),
+        review_names: memberNames(members, ["复核", "复核阶段"]),
+        prolead_names: memberNames(members, ["专业负责人", "专业审核"]),
+        yuan_names: memberNames(members, ["院审"]),
+        total_names: memberNames(members, ["总体审核"]),
+        group_names: memberNames(members, ["集团审核"])
+      }
+    })
+    activeProjects.value = allProjects.filter(p => 
       p.status !== "completed" && p.status !== "closed"
     )
     await employeeStore.loadEmployees()
     for (let p of activeProjects.value) {
-      try {
-        const mRes = await api.get("/projects/" + p.id + "/members")
-        p.memberCount = (mRes.data || []).length
-      } catch(e) { p.memberCount = 0 }
+      p.memberCount = (membersByProject[p.id] || []).length
     }
   } catch (err) { console.error("load kb error:", err) }
 })
@@ -228,30 +253,6 @@ async function downloadEmpTemplate() {
 async function loadWorkloads() {
   try { const r = await api.get("/workload-records"); workloads.value = r.data }
   catch(e) { console.error(e) }
-}
-
-function startWlEdit(w) {
-  editingWlId.value = w.id
-  Object.assign(editWlForm, {
-    project_code: w.project_code || "", project_name: w.project_name || "",
-    project_type: w.project_type || "", scale: w.scale || "",
-    overall_lead: w.overall_lead || "", architecture_lead: w.architecture_lead || "",
-    calculated_work_days: w.calculated_work_days || 0, stage: w.stage || "",
-    participants: w.participants || "", specific_work: w.specific_work || "",
-    actual_work_days_architecture: w.actual_work_days_architecture || 0,
-    actual_work_days_structure: w.actual_work_days_structure || 0,
-    actual_work_days_other: w.actual_work_days_other || 0,
-    actual_duration_days: w.actual_duration_days || 0,
-    quality_grade: w.quality_grade || "", year: w.year || "", remark: w.remark || ""
-  })
-}
-
-async function handleWlUpdate() {
-  try {
-    await api.put("/workload-records/" + editingWlId.value, { ...editWlForm })
-    editingWlId.value = null
-    await loadWorkloads()
-  } catch(e) { alert("保存失败: " + (e.response?.data?.detail || e.message)) }
 }
 
 async function handleWlDelete(id) {

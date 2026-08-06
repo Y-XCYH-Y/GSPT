@@ -18,6 +18,11 @@ class UserCreate(BaseModel):
     phone: str = ""
     employee_id: str = ""
 
+class UpdateAccountRequest(BaseModel):
+    current_password: str
+    new_username: Optional[str] = None
+    new_password: Optional[str] = None
+
 class UserResponse(BaseModel):
     id: int
     username: str
@@ -66,6 +71,7 @@ class ProjectCreate(BaseModel):
     planned_end_date: Optional[date] = None
     planned_man_days: float = 0
     current_stage: Optional[str] = "方案设计"
+    drawing_list: Optional[list] = []
     description: Optional[str] = None
 
 class ProjectResponse(BaseModel):
@@ -149,16 +155,6 @@ class QuickCommand(BaseModel):
     skill_id: Optional[int] = None
 
 # 对话相关
-class ChatRequest(BaseModel):
-    query: str
-    skill: Optional[str] = None
-
-class ChatResponse(BaseModel):
-    response: str
-    skill_used: Optional[str] = None
-    data: Optional[dict] = None
-
-# 质量评定
 class QualityStandardCreate(BaseModel):
     category: str
     standard_name: str
@@ -313,7 +309,7 @@ class WorkdayRecordResponse(WorkdayRecordCreate):
 class PerformanceScoreCreate(BaseModel):
     assessment_id: int
     target_user_id: int
-    score: float
+    score: float = Field(ge=0, le=100)
     evaluator_role: str
     project_name: Optional[str] = None
     comment: Optional[str] = None
@@ -592,10 +588,10 @@ class ProjectMemberScoreCreate(BaseModel):
     target_employee_id: Optional[str] = None
     role: Optional[str] = None
     stage: Optional[str] = None
-    score: Optional[float] = None
-    tech_ability: Optional[float] = None
-    work_quality: Optional[float] = None
-    cooperation: Optional[float] = None
+    score: Optional[float] = Field(default=None, ge=0, le=100)
+    tech_ability: Optional[float] = Field(default=None, ge=0, le=100)
+    work_quality: Optional[float] = Field(default=None, ge=0, le=100)
+    cooperation: Optional[float] = Field(default=None, ge=0, le=100)
     comment: Optional[str] = None
 
 class ProjectMemberScoreResponse(BaseModel):

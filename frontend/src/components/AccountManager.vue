@@ -15,7 +15,7 @@
               <td>{{ u.employee_id || "-" }}</td><td>{{ u.profession || "-" }}</td>
               <td><select v-model="u.role" class="input input-sm" @change="updateRole(u)" :disabled="u.id===authStore.user?.id">
                 <option value="director">所长</option><option value="deputy_director">副所长</option>
-                <option value="project_leader">项目负责人</option><option value="member">团队成员</option>
+                <option value="member">成员</option>
               </select></td>
               <td><span class="badge" :class="u.is_on_leave?'badge-yellow':'badge-green'">{{ u.is_on_leave?"休假":"活跃" }}</span><button v-if="u.id!==authStore.user?.id" class="btn btn-sm btn-outline" @click="toggleLeave(u)" style="margin-left:4px">{{ u.is_on_leave?"活跃":"休假" }}</button></td>
             </tr>

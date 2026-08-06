@@ -246,6 +246,150 @@ def import_workload_from_excel(file_content, db):
             return default
         data[key] = v
 
+    headers = [str(h).strip() for h in df.columns]
+
+    def _find_col(name):
+        for i, h in enumerate(headers):
+            if h == name:
+                return i
+        return -1
+
+    new_mode = _find_col("项目编号") >= 0
+
+    if new_mode:
+        def _cell(row, name, default=""):
+            i = _find_col(name)
+            if i < 0 or i >= len(row):
+                return default
+            v = row[i]
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                return default
+            s = str(v).strip()
+            return s if s and s.lower() != "nan" else default
+
+        def _parse_float(s):
+            try:
+                return float(s)
+            except Exception:
+                return 0
+
+        def _parse_date(s):
+            if not s:
+                return None
+            try:
+                from datetime import datetime as _dt
+                return _dt.strptime(str(s)[:10], "%Y-%m-%d").date()
+            except Exception:
+                return None
+
+        def _parse_area(s):
+            import re
+            m = re.search(r"[\d.]+", s or "")
+            return float(m.group()) if m else 0
+
+        def _split_names(s):
+            if not s:
+                return []
+            return [x.strip() for x in s.replace("、", ",").replace("，", ",").replace("；", ",").replace(";", ",").split(",") if x.strip()]
+
+        role_cols = ["设计", "复核", "专业负责人", "院审", "总体审核", "集团审核"]
+        for idx, row in df.iterrows():
+            try:
+                code = _cell(row, "项目编号")
+                if not code:
+                    continue
+                project_type = _cell(row, "项目类型")
+                scale = _cell(row, "规模")
+                stage = _cell(row, "阶段")
+                start_date = _parse_date(_cell(row, "开始日期"))
+                end_date = _parse_date(_cell(row, "预计结束"))
+                planned_days = _parse_float(_cell(row, "计划工天", "0"))
+                lead = _cell(row, "项目负责人")
+                participants = "、".join([x for x in [_cell(row, c) for c in role_cols] if x])
+
+                existing = db.query(models.WorkloadRecord).filter(models.WorkloadRecord.project_code == code).first()
+                if existing:
+                    existing.project_code = code
+                    if not existing.project_name:
+                        existing.project_name = code
+                    if project_type:
+                        existing.project_type = project_type
+                    if scale:
+                        existing.scale = scale
+                    if stage:
+                        existing.stage = stage
+                    if lead:
+                        existing.overall_lead = lead
+                    if participants:
+                        existing.participants = participants
+                    if planned_days:
+                        existing.calculated_work_days = planned_days
+                    results["updated"] += 1
+                else:
+                    rec = models.WorkloadRecord(
+                        project_code=code,
+                        project_name=code,
+                        project_type=project_type,
+                        scale=scale,
+                        stage=stage,
+                        overall_lead=lead,
+                        participants=participants,
+                        calculated_work_days=planned_days,
+                        year=str(dt.utcnow().year)
+                    )
+                    db.add(rec)
+                    results["created"] += 1
+
+                project = db.query(models.Project).filter(models.Project.project_code == code).first()
+                if not project:
+                    project = models.Project(
+                        project_code=code,
+                        project_name=code,
+                        project_type=project_type or "其它",
+                        area=_parse_area(scale),
+                        start_date=start_date,
+                        planned_end_date=end_date,
+                        planned_man_days=planned_days,
+                        current_stage=stage,
+                        created_by=1
+                    )
+                    db.add(project)
+                    db.flush()
+                else:
+                    if project_type:
+                        project.project_type = project_type
+                    if start_date:
+                        project.start_date = start_date
+                    if end_date:
+                        project.planned_end_date = end_date
+                    if planned_days:
+                        project.planned_man_days = planned_days
+                    if stage:
+                        project.current_stage = stage
+
+                for role_col in role_cols:
+                    names = _split_names(_cell(row, role_col))
+                    for name in names:
+                        exists = db.query(models.ProjectMember).filter(
+                            models.ProjectMember.project_id == project.id,
+                            models.ProjectMember.employee_id == name,
+                            models.ProjectMember.role == role_col
+                        ).first()
+                        if not exists:
+                            db.add(models.ProjectMember(
+                                project_id=project.id,
+                                employee_id=name,
+                                employee_name=name,
+                                department="",
+                                role=role_col
+                            ))
+            except Exception as e:
+                results["failed"] += 1
+                results["errors"].append("Row " + str(idx + 2) + ": " + str(e))
+        from crud import sync_all_projects_to_workload
+        sync_all_projects_to_workload(db)
+        return results
+
     for idx, row in df.iterrows():
         try:
             code_val = row.iloc[1] if len(row) > 1 else None
@@ -336,21 +480,13 @@ def generate_workload_template():
     from io import BytesIO
     output = BytesIO()
     columns = [
-        "序号", "项目编号", "项目名称", "类型", "规模",
-        "总体/专册", "建筑专册", "计算工天", "阶段",
-        "列10", "列11", "列12",
-        "参与人员", "具体工作内容",
-        "建筑实际工天", "结构实际工天", "其他实际工天", "实际工期(天)",
-        "质量等级", "年份", "备注"
+        "项目编号", "项目类型", "规模", "阶段", "开始日期", "预计结束", "计划工天", "项目负责人",
+        "设计", "复核", "专业负责人", "院审", "总体审核", "集团审核"
     ]
     df = pd.DataFrame(columns=columns)
     df.loc[0] = [
-        1, "DT2026-001-01", "示例项目", "大铁", "50000",
-        "张三", "李四", 120, "初步设计",
-        "", "", "",
-        "张三、李四", "站房设计",
-        60, 30, 10, 90,
-        "优", "2026", ""
+        "DT2026-001-01", "大铁", "50000㎡", "初步设计", "2026-01-01", "2026-12-31", "120", "张三",
+        "李四、王五", "赵六", "孙七", "", "", ""
     ]
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name='项目库', index=False)

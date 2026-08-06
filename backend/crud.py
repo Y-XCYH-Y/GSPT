@@ -63,24 +63,101 @@ def get_projects(db: Session) -> List[models.Project]:
     return [dict(r) for r in rows]
 
 def _sync_project_to_workload(db: Session, pdata: dict, user_id: int):
-    from datetime import datetime
+    pcode = (pdata.get("project_code") or "").strip()
+    pname = (pdata.get("project_name") or "").strip()
     existing = None
-    pcode = pdata.get("project_code", "")
-    pname = pdata.get("project_name", "")
     if pcode:
         existing = db.query(models.WorkloadRecord).filter(models.WorkloadRecord.project_code == pcode).first()
     if not existing and pname:
         existing = db.query(models.WorkloadRecord).filter(models.WorkloadRecord.project_name == pname).first()
+
+    stage = pdata.get("current_stage") or pdata.get("stage") or ""
+    participants = (pdata.get("participants") or "").strip()
+    leader_name = (pdata.get("project_leader_name") or "").strip()
+    scale_val = pdata.get("scale") or ""
+    if not scale_val and pdata.get("area") is not None:
+        try:
+            area_float = float(pdata["area"])
+            scale_val = ("%g" % area_float) + "㎡"
+        except Exception:
+            scale_val = ""
+
     if not existing:
         wr = models.WorkloadRecord(
-            project_code=pdata.get("project_code", ""),
-            project_name=pdata.get("project_name", ""),
-            project_type=pdata.get("project_type", ""),
-            stage=pdata.get("current_stage", ""),
+            project_code=pcode,
+            project_name=pname,
+            project_type=pdata.get("project_type") or "",
+            stage=stage,
+            scale=scale_val,
+            overall_lead=leader_name,
+            participants=participants,
+            calculated_work_days=float(pdata.get("planned_man_days") or 0),
             year=str(datetime.utcnow().year)
         )
         db.add(wr)
-        print(f"?????(???): {pdata.get('project_name', '')}")
+        return wr
+
+    if pcode:
+        existing.project_code = pcode
+    if pname:
+        existing.project_name = pname
+    if pdata.get("project_type"):
+        existing.project_type = pdata["project_type"]
+    if stage:
+        existing.stage = stage
+    if scale_val and (not existing.scale or existing.scale in ("nan", "None", "")):
+        existing.scale = scale_val
+    if leader_name:
+        existing.overall_lead = leader_name
+    if participants:
+        existing.participants = participants
+    if not existing.calculated_work_days and pdata.get("planned_man_days"):
+        existing.calculated_work_days = float(pdata["planned_man_days"])
+    existing.updated_at = datetime.utcnow()
+    return existing
+
+
+def _project_to_workload_payload(db: Session, project: models.Project) -> dict:
+    pdata = {
+        "id": project.id,
+        "project_code": project.project_code or "",
+        "project_name": project.project_name or "",
+        "project_type": project.project_type or "",
+        "current_stage": project.current_stage or "",
+        "area": project.area if project.area is not None else 0,
+        "planned_man_days": project.planned_man_days or 0,
+        "start_date": project.start_date,
+        "planned_end_date": project.planned_end_date,
+    }
+    if project.project_leader_id:
+        leader = db.query(models.User).filter(models.User.id == project.project_leader_id).first()
+        if leader and leader.name:
+            pdata["project_leader_name"] = leader.name
+    members = db.query(models.ProjectMember).filter(models.ProjectMember.project_id == project.id).all()
+    names = []
+    seen_names = set()
+    for m in members:
+        name = (m.employee_name or "").strip()
+        if name and name not in seen_names:
+            seen_names.add(name)
+            names.append(name)
+    pdata["participants"] = "、".join(names)
+    return pdata
+
+
+def sync_project_to_workload(db: Session, project: models.Project):
+    _sync_project_to_workload(db, _project_to_workload_payload(db, project), project.created_by or 0)
+
+
+def sync_all_projects_to_workload(db: Session):
+    projects = db.query(models.Project).all()
+    for project in projects:
+        _sync_project_to_workload(db, _project_to_workload_payload(db, project), project.created_by or 0)
+    db.commit()
+    return {
+        "synced": len(projects),
+        "records": db.query(models.WorkloadRecord).count()
+    }
 
 
 def create_project(db: Session, data: schemas.ProjectCreate, user_id: int):
@@ -88,10 +165,21 @@ def create_project(db: Session, data: schemas.ProjectCreate, user_id: int):
     db.add(project)
     db.commit()
     db.refresh(project)
-    # ?????????
-    _sync_project_to_workload(db, data.model_dump(), user_id)
+    sync_project_to_workload(db, project)
     db.commit()
     return project
+
+
+def _remove_project_from_workload(db: Session, project: models.Project):
+    pcode = (project.project_code or "").strip()
+    pname = (project.project_name or "").strip()
+    record = None
+    if pcode:
+        record = db.query(models.WorkloadRecord).filter(models.WorkloadRecord.project_code == pcode).first()
+    if not record and pname:
+        record = db.query(models.WorkloadRecord).filter(models.WorkloadRecord.project_name == pname).first()
+    if record:
+        db.delete(record)
 
 def get_project(db: Session, project_id: int):
     return db.query(models.Project).filter(models.Project.id == project_id).first()
@@ -105,6 +193,7 @@ def delete_project(db: Session, project_id: int) -> bool:
     # Delete related members first
     db.query(models.ProjectMember).filter(models.ProjectMember.project_id == project_id).delete()
     db.query(models.Task).filter(models.Task.project_id == project_id).delete()
+    _remove_project_from_workload(db, project)
     db.delete(project)
     db.commit()
     return True
@@ -874,6 +963,10 @@ def add_project_member(db: Session, project_id: int, data: dict):
     db.add(member)
     db.commit()
     db.refresh(member)
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if project:
+        sync_project_to_workload(db, project)
+        db.commit()
     return {
         "id": member.id,
         "project_id": member.project_id,
@@ -906,6 +999,10 @@ def update_project_member(db: Session, project_id: int, member_id: int, data: di
         member.stage_status = data["stage_status"]
     db.commit()
     db.refresh(member)
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if project:
+        sync_project_to_workload(db, project)
+        db.commit()
     return {
         "id": member.id, "project_id": member.project_id,
         "employee_id": member.employee_id, "employee_name": member.employee_name,
@@ -933,6 +1030,10 @@ def remove_project_member(db: Session, project_id: int, member_id: int) -> bool:
         update_employee_workload(db, u.id)
     db.delete(member)
     db.commit()
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if project:
+        sync_project_to_workload(db, project)
+        db.commit()
     return True
 
 
@@ -1158,7 +1259,7 @@ def approve_project_request(db: Session, request_id: int, reviewer_id: int):
     db.add(proj)
     db.commit()
     db.refresh(proj)
-    _sync_project_to_workload(db, {"project_code": req.project_code or "", "project_name": req.project_name, "project_type": req.project_type, "current_stage": req.stage}, req.requested_by)
+    sync_project_to_workload(db, proj)
     maker = db.query(models.User).filter(models.User.id == req.requested_by).first()
     if maker:
         member = models.ProjectMember(
@@ -1169,6 +1270,8 @@ def approve_project_request(db: Session, request_id: int, reviewer_id: int):
             role="项目负责人"
         )
         db.add(member)
+        db.commit()
+        sync_project_to_workload(db, proj)
         db.commit()
     return req, proj
 
