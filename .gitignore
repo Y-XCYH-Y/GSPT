@@ -30,3 +30,5 @@ temp_update_main.py
 .env
 .env.*
 *.local
+
+# Vite cache.vite/

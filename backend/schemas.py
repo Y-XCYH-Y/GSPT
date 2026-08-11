@@ -434,6 +434,7 @@ class ProjectMemberCreate(BaseModel):
     employee_name: str
     department: str = ""
     role: str
+    note: Optional[str] = None
 
 class ProjectMemberResponse(BaseModel):
     id: int

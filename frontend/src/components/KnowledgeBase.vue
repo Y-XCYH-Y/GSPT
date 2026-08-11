@@ -213,7 +213,7 @@ onMounted(async () => {
       }
     })
     activeProjects.value = allProjects.filter(p => 
-      p.status !== "completed" && p.status !== "closed"
+      p.is_official !== false && p.status !== "completed" && p.status !== "closed"
     )
     await employeeStore.loadEmployees()
     for (let p of activeProjects.value) {

@@ -58,9 +58,19 @@ def get_projects(db: Session) -> List[models.Project]:
     db_path = os.path.join(os.path.dirname(__file__), "building_institute.db")
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    rows = conn.execute("SELECT id, project_name, project_type, area, status, start_date, planned_end_date, actual_end_date, planned_man_days, actual_man_days, alert_level, description, created_by, project_leader_id, current_stage FROM projects").fetchall()
+    rows = conn.execute("SELECT id, project_name, project_type, area, status, start_date, planned_end_date, actual_end_date, planned_man_days, actual_man_days, alert_level, description, created_by, project_leader_id, current_stage, drawing_list, is_official FROM projects").fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        row = dict(r)
+        if isinstance(row.get("drawing_list"), str):
+            try:
+                row["drawing_list"] = json.loads(row["drawing_list"] or "[]")
+            except Exception:
+                row["drawing_list"] = []
+        row["is_official"] = bool(row.get("is_official"))
+        result.append(row)
+    return result
 
 def _sync_project_to_workload(db: Session, pdata: dict, user_id: int):
     pcode = (pdata.get("project_code") or "").strip()
@@ -146,11 +156,13 @@ def _project_to_workload_payload(db: Session, project: models.Project) -> dict:
 
 
 def sync_project_to_workload(db: Session, project: models.Project):
+    if not bool(getattr(project, "is_official", True)):
+        return
     _sync_project_to_workload(db, _project_to_workload_payload(db, project), project.created_by or 0)
 
 
 def sync_all_projects_to_workload(db: Session):
-    projects = db.query(models.Project).all()
+    projects = db.query(models.Project).filter(models.Project.is_official == True).all()
     for project in projects:
         _sync_project_to_workload(db, _project_to_workload_payload(db, project), project.created_by or 0)
     db.commit()
@@ -823,7 +835,7 @@ def dedup_workload_records(db: Session):
 
 # ====== 账号管理 CRTUD ======
 def get_all_users(db: Session):
-    return db.query(models.User).order_by(models.User.id).all()
+    return db.query(models.User).filter(models.User.is_active == True).order_by(models.User.id).all()
 
 def update_user_by_admin(db: Session, user_id: int, data: dict):
     user = db.query(models.User).filter(models.User.id == user_id).first()
@@ -975,6 +987,7 @@ def add_project_member(db: Session, project_id: int, data: dict):
         "department": member.department,
         "role": member.role,
         "stage_status": member.stage_status or "pending",
+        "note": member.note or "",
         "created_at": member.created_at
     }
 
@@ -1210,6 +1223,38 @@ def create_project_request(db: Session, data: dict, user_id: int):
     db.add(req)
     db.commit()
     db.refresh(req)
+    from datetime import datetime
+    _start = datetime.strptime(req.start_date, "%Y-%m-%d").date() if req.start_date else None
+    _end = datetime.strptime(req.planned_end_date, "%Y-%m-%d").date() if req.planned_end_date else None
+    proj = models.Project(
+        project_name=req.project_name,
+        project_code=req.project_code or "",
+        project_type=req.project_type,
+        area=req.area,
+        status="planning",
+        start_date=_start,
+        planned_end_date=_end,
+        planned_man_days=req.planned_man_days,
+        created_by=user_id,
+        project_leader_id=user_id,
+        current_stage=req.stage,
+        is_official=False
+    )
+    db.add(proj)
+    db.commit()
+    db.refresh(proj)
+    req.project_id = proj.id
+    maker = db.query(models.User).filter(models.User.id == user_id).first()
+    if maker:
+        db.add(models.ProjectMember(
+            project_id=proj.id,
+            employee_id=maker.employee_id or maker.username,
+            employee_name=maker.name,
+            department=maker.department or "",
+            role="项目负责人"
+        ))
+    db.commit()
+    db.refresh(req)
     return req
 
 def get_project_requests(db: Session, status: str = None, user_id: int = None):
@@ -1224,7 +1269,7 @@ def get_project_requests(db: Session, status: str = None, user_id: int = None):
         req_user = db.query(models.User).filter(models.User.id == r.requested_by).first() if r.requested_by else None
         rev_user = db.query(models.User).filter(models.User.id == r.reviewer_id).first() if r.reviewer_id else None
         out.append({
-            "id": r.id, "project_name": r.project_name, "project_type": r.project_type,
+            "id": r.id, "project_id": r.project_id, "project_name": r.project_name, "project_type": r.project_type,
             "area": r.area, "stage": r.stage, "start_date": r.start_date,
             "planned_end_date": r.planned_end_date, "planned_man_days": r.planned_man_days,
             "status": r.status, "requested_by": r.requested_by,
@@ -1248,28 +1293,52 @@ def approve_project_request(db: Session, request_id: int, reviewer_id: int):
     db.refresh(req)
     _start = datetime.strptime(req.start_date, "%Y-%m-%d").date() if req.start_date else None
     _end = datetime.strptime(req.planned_end_date, "%Y-%m-%d").date() if req.planned_end_date else None
-    proj = models.Project(
-        project_name=req.project_name, project_code=req.project_code or "", project_type=req.project_type,
-        area=req.area, status="planning", start_date=_start,
-        planned_end_date=_end,
-        planned_man_days=req.planned_man_days,
-        created_by=req.requested_by, project_leader_id=req.requested_by,
-        current_stage=req.stage
-    )
-    db.add(proj)
+    proj = None
+    if req.project_id:
+        proj = db.query(models.Project).filter(models.Project.id == req.project_id).first()
+    if not proj and req.project_code:
+        proj = db.query(models.Project).filter(models.Project.project_code == req.project_code).first()
+    if not proj:
+        proj = db.query(models.Project).filter(models.Project.project_name == req.project_name).first()
+    if not proj:
+        proj = models.Project(
+            project_name=req.project_name, project_code=req.project_code or "", project_type=req.project_type,
+            area=req.area, status="planning", start_date=_start,
+            planned_end_date=_end,
+            planned_man_days=req.planned_man_days,
+            created_by=req.requested_by, project_leader_id=req.requested_by,
+            current_stage=req.stage
+        )
+        db.add(proj)
+        db.commit()
+        db.refresh(proj)
+    proj.is_official = True
+    proj.project_name = req.project_name
+    proj.project_code = req.project_code or proj.project_code
+    proj.project_type = req.project_type
+    proj.area = req.area
+    proj.current_stage = req.stage
+    proj.start_date = _start
+    proj.planned_end_date = _end
+    proj.planned_man_days = req.planned_man_days
+    req.project_id = proj.id
     db.commit()
-    db.refresh(proj)
     sync_project_to_workload(db, proj)
     maker = db.query(models.User).filter(models.User.id == req.requested_by).first()
     if maker:
-        member = models.ProjectMember(
-            project_id=proj.id,
-            employee_id=maker.employee_id or maker.username,
-            employee_name=maker.name,
-            department=maker.department or "",
-            role="项目负责人"
-        )
-        db.add(member)
+        exists_member = db.query(models.ProjectMember).filter(
+            models.ProjectMember.project_id == proj.id,
+            models.ProjectMember.employee_name == maker.name,
+            models.ProjectMember.role == "项目负责人"
+        ).first()
+        if not exists_member:
+            db.add(models.ProjectMember(
+                project_id=proj.id,
+                employee_id=maker.employee_id or maker.username,
+                employee_name=maker.name,
+                department=maker.department or "",
+                role="项目负责人"
+            ))
         db.commit()
         sync_project_to_workload(db, proj)
         db.commit()
@@ -1281,6 +1350,15 @@ def reject_project_request(db: Session, request_id: int, reviewer_id: int):
         return None
     if req.status != "pending":
         return req
+    if req.project_id:
+        proj = db.query(models.Project).filter(models.Project.id == req.project_id).first()
+        if proj and not proj.is_official:
+            db.query(models.ProjectMember).filter(models.ProjectMember.project_id == proj.id).delete(synchronize_session=False)
+            db.query(models.ProjectStageProgress).filter(models.ProjectStageProgress.project_id == proj.id).delete(synchronize_session=False)
+            db.query(models.Task).filter(models.Task.project_id == proj.id).delete(synchronize_session=False)
+            db.query(models.ProjectMemberScore).filter(models.ProjectMemberScore.project_id == proj.id).delete(synchronize_session=False)
+            db.query(models.ProjectWorkdayAlloc).filter(models.ProjectWorkdayAlloc.project_id == proj.id).delete(synchronize_session=False)
+            db.delete(proj)
     req.status = "rejected"
     req.reviewer_id = reviewer_id
     req.reviewed_at = datetime.utcnow()

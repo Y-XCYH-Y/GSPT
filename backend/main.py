@@ -93,6 +93,15 @@ async def lifespan(app: FastAPI):
             db.execute(text("ALTER TABLE projects ADD COLUMN drawing_list TEXT DEFAULT '[]'"))
             db.commit()
             print("提示: 已添加 drawing_list 列")
+        if "is_official" not in cols2:
+            db.execute(text("ALTER TABLE projects ADD COLUMN is_official BOOLEAN DEFAULT 1"))
+            db.commit()
+            print("提示: 已添加 is_official 列")
+        cols3 = [c3["name"] for c3 in inspector.get_columns("project_requests")]
+        if "project_id" not in cols3:
+            db.execute(text("ALTER TABLE project_requests ADD COLUMN project_id INTEGER"))
+            db.commit()
+            print("提示: 已添加 project_requests.project_id 列")
 
 
     except Exception as e:
@@ -205,6 +214,11 @@ def login(user_login: schemas.UserLogin, db: Session = Depends(get_db)):
 
             detail="用户名或密码错误"
 
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="账号已停用"
         )
 
     
@@ -483,6 +497,12 @@ def get_projects(
 
             proj_ids.add(p.id)
 
+    for p in db.query(models.Project).filter(
+        models.Project.created_by == current_user.id,
+        models.Project.is_official == False
+    ).all():
+        proj_ids.add(p.id)
+
     if not proj_ids:
 
         return []
@@ -647,10 +667,6 @@ def reject_project_request(request_id: int, db: Session = Depends(get_db), curre
     if not req:
 
         raise HTTPException(404, detail="申请不存在")
-
-    if req.status != "pending":
-
-        raise HTTPException(400, detail="该申请已被处理，当前状态：" + req.status)
 
     return {"message": "已拒绝"}
 
@@ -941,6 +957,27 @@ def update_project_end_date(project_id: int, data: dict, db: Session = Depends(g
     crud.sync_project_to_workload(db, proj)
     db.commit()
     return {"message": "预计完成时间已更新", "planned_end_date": proj.planned_end_date}
+
+
+
+@app.put("/api/projects/{project_id}/drawing-list")
+def save_project_drawing_list(
+    project_id: int,
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    proj = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    role = auth.get_user_role(current_user)
+    if role not in ["director", "deputy_director"] and proj.project_leader_id != current_user.id:
+        raise HTTPException(status_code=403, detail="仅所长或项目负责人可操作")
+    proj.drawing_list = data.get("drawing_list") or []
+    db.commit()
+    crud.sync_project_to_workload(db, proj)
+    db.commit()
+    return {"message": "人员安排已保存", "drawing_list": proj.drawing_list}
 
 
 
@@ -2002,7 +2039,7 @@ def get_my_projects(
 
         p = db.query(models.Project).filter(models.Project.id == m.project_id).first()
 
-        if p and p.project_name:
+        if p and p.project_name and p.is_official:
 
             key = p.project_name
 
@@ -2046,7 +2083,7 @@ def get_my_projects(
 
         p = db.query(models.Project).filter(models.Project.id == s.project_id).first()
 
-        if p and p.project_name:
+        if p and p.project_name and p.is_official:
 
             key = p.project_name
 

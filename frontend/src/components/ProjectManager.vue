@@ -597,31 +597,6 @@
 
 
 
-<div class="form-row">
-
-<label>人员安排</label>
-
-<div class="drawing-list">
-
-<div v-for="(d, idx) in np.drawing_list" :key="idx" class="drawing-item">
-
-<input v-model="d.name" placeholder="图名" />
-
-<input v-model.number="d.area" type="number" placeholder="建筑面积" />
-
-<input v-model="d.personnel" placeholder="人员" />
-
-<input v-model="d.remark" placeholder="备注" />
-
-<button class="pm-btn-xs pm-btn-danger" @click="removeDrawing(idx)">删除</button>
-
-</div>
-
-<button class="pm-btn pm-btn-sm pm-btn-outline" @click="addDrawing()">➕ 添加一行</button>
-
-</div>
-
-</div>
 
 
 
@@ -823,7 +798,7 @@
 
 
 
-        <span v-if="isOverdue(p)" style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:10px;font-size:11px">已超期</span><span v-if="p.status === 'closed' || p.status === 'completed'" style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:10px;font-size:11px">已完成</span>
+        <span v-if="!p.is_official" style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;font-size:11px">待审批</span><span v-if="isOverdue(p)" style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:10px;font-size:11px">已超期</span><span v-if="p.status === 'closed' || p.status === 'completed'" style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:10px;font-size:11px">已完成</span>
 
 
 
@@ -1042,10 +1017,10 @@
           <h5>1. 项目负责人 <span class="sec-count">({{ leaderMems(p.id).length }})</span></h5>
           <div v-if="leaderMems(p.id).length === 0" class="sec-empty">暂无</div>
           <table v-else class="mem-tbl">
-            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
+            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>图名</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
             <tbody>
               <tr v-for="m in leaderMems(p.id)" :key="m.id || m.key">
-                <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td><td></td>
+                <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td><td>{{ memberDrawingName(p, m) }}</td><td>{{ memberDrawingArea(p, m) }}</td><td></td>
                 <td><input class="note-input" v-model="m.note" :disabled="!canManage(p)" @change="saveNote(p.id, m)" placeholder="备注" /></td>
                 <td>{{ allocDay(p.id, m) }}</td>
                 <td><button v-if="canManage(p)" class="pm-btn-xs pm-btn-danger" @click="rmMember(p.id, m)">移除</button></td>
@@ -1057,10 +1032,10 @@
           <h5>2. 专业负责人 <span class="sec-count">({{ proLeadMems(p.id).length }})</span></h5>
           <div v-if="proLeadMems(p.id).length === 0" class="sec-empty">暂无</div>
           <table v-else class="mem-tbl">
-            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
+            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>图名</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
             <tbody>
               <tr v-for="m in proLeadMems(p.id)" :key="m.id || m.key">
-                <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td><td></td>
+                <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td><td>{{ memberDrawingName(p, m) }}</td><td>{{ memberDrawingArea(p, m) }}</td><td></td>
                 <td><input class="note-input" v-model="m.note" :disabled="!canManage(p)" @change="saveNote(p.id, m)" placeholder="备注" /></td>
                 <td>{{ allocDay(p.id, m) }}</td>
                 <td><button v-if="canManage(p)" class="pm-btn-xs pm-btn-danger" @click="rmMember(p.id, m)">移除</button></td>
@@ -1114,7 +1089,7 @@
 
 
 
-            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
+            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>图名</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
 
 
 
@@ -1159,7 +1134,7 @@
 
 
 
-                <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td><td></td>
+                <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td><td>{{ memberDrawingName(p, m) }}</td><td>{{ memberDrawingArea(p, m) }}</td><td></td>
 
 
 
@@ -1339,7 +1314,7 @@
 
 
 
-            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
+            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>图名</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
 
 
 
@@ -1384,7 +1359,7 @@
 
 
 
-                <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td><td></td>
+                <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td><td>{{ memberDrawingName(p, m) }}</td><td>{{ memberDrawingArea(p, m) }}</td><td></td>
 
 
 
@@ -1564,7 +1539,7 @@
 
 
 
-<thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>角色</th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
+<thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>图名</th><th>建筑面积</th><th>角色</th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
 
 
 
@@ -1609,7 +1584,7 @@
 
 
 
-<td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td>
+<td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td><td>{{ memberDrawingName(p, m) }}</td><td>{{ memberDrawingArea(p, m) }}</td>
 
 
 
@@ -2179,6 +2154,9 @@
 
 
 
+    <input v-model="mdrawing[p.id]" placeholder="图名" />
+    <input v-model.number="marea[p.id]" type="number" placeholder="建筑面积" />
+    <input v-model="mnote[p.id]" placeholder="备注" />
     <button class="pm-btn pm-btn-sm pm-btn-primary" @click="addMem(p.id)">添加</button>
 
 
@@ -2766,6 +2744,10 @@ const mn = ref({})
 
 const mr = ref({})
 
+const mdrawing = ref({})
+const marea = ref({})
+const mnote = ref({})
+
 
 
 
@@ -2894,6 +2876,33 @@ function removeDrawing(idx) {
 }
 
 
+
+function addProjectDrawing(p) {
+  if (!p.drawing_list) p.drawing_list = []
+  p.drawing_list.push({ name: "", area: null, personnel: "", remark: "" })
+}
+
+function removeProjectDrawing(p, idx) {
+  p.drawing_list.splice(idx, 1)
+}
+
+async function saveProjectDrawingList(p) {
+  try {
+    const r = await fetch("/api/projects/" + p.id + "/drawing-list", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + auth.token },
+      body: JSON.stringify({ drawing_list: p.drawing_list || [] })
+    })
+    if (r.ok) {
+      alert("人员安排已保存")
+    } else {
+      const e = await r.json()
+      alert("保存失败: " + (e.detail || "未知错误"))
+    }
+  } catch(e) {
+    alert("保存失败: " + e.message)
+  }
+}
 
 function resetNp() { np.value = { project_code: "", project_name: "", project_type: "民建", area: 0, status: "planning", start_date: "", planned_end_date: "", planned_man_days: 0, current_stage: "方案设计", drawing_list: [] } }
 
@@ -3481,6 +3490,20 @@ function isOverdue(p) {
 
 
 function getMems(pid) { return members.value[pid] || [] }
+
+function memberDrawing(p, m) {
+  return (p.drawing_list || []).find(d => (d.personnel || "") === (m.employee_name || "")) || null
+}
+
+function memberDrawingName(p, m) {
+  const d = memberDrawing(p, m)
+  return d && d.name ? d.name : ""
+}
+
+function memberDrawingArea(p, m) {
+  const d = memberDrawing(p, m)
+  return d && d.area !== undefined && d.area !== null && d.area !== "" ? d.area : ""
+}
 
 
 
@@ -4399,7 +4422,7 @@ async function handleCreateProject() {
 
 
 
-      if (r.ok) { showAddForm.value = false; resetNp(); alert("申请已提交，待所长批准") }
+      if (r.ok) { showAddForm.value = false; resetNp(); await loadProjects(); alert("申请已提交，待所长批准") }
 
 
 
@@ -5261,6 +5284,7 @@ async function addMem(pid) {
 
 
   const sel = ms.value[pid] || ""; const name = mn.value[pid] || ""; const role = mr.value[pid] || ""
+  const drawing = mdrawing.value[pid] || ""; const area = marea.value[pid] || 0; const note = mnote.value[pid] || ""
 
 
 
@@ -5365,7 +5389,7 @@ async function addMem(pid) {
 
 
 
-    const r = await fetch("/api/projects/" + pid + "/members", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + auth.token }, body: JSON.stringify({ employee_id: eid, employee_name: ename, department: dept, role: role }) })
+    const r = await fetch("/api/projects/" + pid + "/members", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + auth.token }, body: JSON.stringify({ employee_id: eid, employee_name: ename, department: dept, role: role, note: note }) })
 
 
 
@@ -5380,7 +5404,16 @@ async function addMem(pid) {
 
 
 
-    if (r.ok) { ms.value[pid] = ""; mn.value[pid] = ""; mr.value[pid] = ""; await loadMembers(pid) }
+    if (r.ok) {
+      const p = projects.value.find(x => x.id === pid)
+      if (p && drawing) {
+        if (!p.drawing_list) p.drawing_list = []
+        p.drawing_list.push({ name: drawing, area: area || null, personnel: ename, remark: note })
+        await saveProjectDrawingList(p)
+      }
+      ms.value[pid] = ""; mn.value[pid] = ""; mr.value[pid] = ""; mdrawing.value[pid] = ""; marea.value[pid] = 0; mnote.value[pid] = ""
+      await loadMembers(pid)
+    }
 
 
 
@@ -5470,7 +5503,15 @@ async function rmMember(pid, m) { if (!confirm("确定移除 " + m.employee_name
 
 
 
-  try { const r = await fetch("/api/projects/" + pid + "/members/" + m.id, { method: "DELETE", headers: { Authorization: "Bearer " + auth.token } }); if (r.ok) { await loadMembers(pid) } else { alert("移除失败") } }
+  try { const r = await fetch("/api/projects/" + pid + "/members/" + m.id, { method: "DELETE", headers: { Authorization: "Bearer " + auth.token } }); if (r.ok) {
+    const p = projects.value.find(x => x.id === pid)
+    if (p) {
+      const before = (p.drawing_list || []).length
+      p.drawing_list = (p.drawing_list || []).filter(d => (d.personnel || "") !== (m.employee_name || ""))
+      if (p.drawing_list.length !== before) await saveProjectDrawingList(p)
+    }
+    await loadMembers(pid)
+  } else { alert("移除失败") } }
 
 
 
@@ -7496,9 +7537,11 @@ onMounted(() => { loadProjects(); loadPool() })
 .mem-tbl th:nth-child(2), .mem-tbl td:nth-child(2) { width: 12%; }
 .mem-tbl th:nth-child(3), .mem-tbl td:nth-child(3) { width: 15%; }
 .mem-tbl th:nth-child(4), .mem-tbl td:nth-child(4) { width: 14%; }
-.mem-tbl th:nth-child(5), .mem-tbl td:nth-child(5) { width: auto; }
-.mem-tbl th:nth-last-child(2), .mem-tbl td:nth-last-child(2) { width: 10%; }
-.mem-tbl th:last-child, .mem-tbl td:last-child { width: 10%; }
+.mem-tbl th:nth-child(5), .mem-tbl td:nth-child(5) { width: 14%; }
+.mem-tbl th:nth-child(6), .mem-tbl td:nth-child(6) { width: 12%; }
+.mem-tbl th:nth-child(7), .mem-tbl td:nth-child(7) { width: auto; }
+.mem-tbl th:nth-last-child(2), .mem-tbl td:nth-last-child(2) { width: 8%; }
+.mem-tbl th:last-child, .mem-tbl td:last-child { width: 8%; }
 
 
 
