@@ -23,6 +23,7 @@ import crud
 import auth
 
 from database import engine, get_db
+from dashboard_routes import router as dashboard_router
 
 
 from import_export import generate_template, import_from_excel, export_to_excel
@@ -193,6 +194,10 @@ app.add_middleware(
     allow_headers=["*"],
 
 )
+
+
+
+app.include_router(dashboard_router)
 
 
 

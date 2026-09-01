@@ -27,6 +27,7 @@
           </button>
         </aside>
         <main class="p-main">
+          <Dashboard v-if="subTab==='dashboard'" />
           <EmployeeManager v-if="subTab==='employee'" />
           <ProjectManager v-if="subTab==='project'" />
           <PerformanceAssessment v-if="subTab==='assessment'" />
@@ -45,6 +46,7 @@
 <script setup>
 import { ref, computed } from "vue"
 import AuditManager from "../components/AuditManager.vue"
+import Dashboard from "../components/Dashboard.vue"
 import { useRouter } from "vue-router"
 import { useAuthStore } from "../stores/auth"
 import EmployeeManager from "../components/EmployeeManager.vue"
@@ -61,6 +63,7 @@ const subTab = ref("")
 
 const dailyMenu = computed(() => {
   var items = []
+  items.push({ key: "dashboard", icon: "📈", label: "看板" })
   if (authStore.isDirector || authStore.isDeputyDirector) {
     items.push({ key: "employee", icon: "👥", label: "员工" })
   }
