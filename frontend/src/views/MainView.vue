@@ -63,7 +63,9 @@ const subTab = ref("")
 
 const dailyMenu = computed(() => {
   var items = []
-  items.push({ key: "dashboard", icon: "📈", label: "看板" })
+  if (authStore.isDirector || authStore.isDeputyDirector) {
+    items.push({ key: "dashboard", icon: "📈", label: "看板" })
+  }
   if (authStore.isDirector || authStore.isDeputyDirector) {
     items.push({ key: "employee", icon: "👥", label: "员工" })
   }

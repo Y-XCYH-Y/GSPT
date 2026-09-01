@@ -683,11 +683,23 @@ def delete_project(
 
     db: Session = Depends(get_db),
 
-    current_user: models.User = Depends(auth.require_role(["director"]))
+    current_user: models.User = Depends(auth.get_current_user)
 
 ):
 
     """删除项目"""
+
+    proj = db.query(models.Project).filter(models.Project.id == project_id).first()
+
+    if not proj:
+
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    role = auth.get_user_role(current_user)
+
+    if role != "director" and proj.project_leader_id != current_user.id:
+
+        raise HTTPException(status_code=403, detail="没有权限删除该项目")
 
     ok = crud.delete_project(db, project_id)
 

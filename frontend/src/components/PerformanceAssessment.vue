@@ -109,7 +109,7 @@
             <option value="">选择项目</option>
             <option v-for="p in scoreProjects" :key="p.id" :value="p.id">{{ p.project_name }}</option>
           </select>
-          <button class="btn btn-primary btn-sm" @click="loadProjectScoreMembers">加载人员</button><button class="btn btn-outline btn-sm" @click="openScoreAlloc()">分配</button>
+          <button class="btn btn-primary btn-sm" @click="loadProjectScoreMembers">加载人员</button><button class="btn btn-outline btn-sm" @click="openScoreAlloc()">工天分配</button>
         </div>
         <div v-if="scoreProjectMembers.length" class="pa-scroll">
           <table class="pa-table">

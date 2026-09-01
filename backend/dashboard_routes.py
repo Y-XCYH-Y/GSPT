@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 import models
-from auth import get_current_user
+from auth import require_role
 from database import get_db
 
 
@@ -40,7 +40,7 @@ def _assessment_workdays(db: Session, year: int):
 
 
 @router.get("/overview")
-def dashboard_overview(db: Session = Depends(get_db), _: models.User = Depends(get_current_user)):
+def dashboard_overview(db: Session = Depends(get_db), _: models.User = Depends(require_role(["director", "deputy_director"]))):
     year = datetime.now().year
     projects = db.query(models.Project).all()
     staff_count = db.query(models.User).filter(models.User.is_active == True).count()
@@ -69,7 +69,7 @@ def dashboard_overview(db: Session = Depends(get_db), _: models.User = Depends(g
 def dashboard_workdays(
     year: int = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(get_current_user),
+    _: models.User = Depends(require_role(["director", "deputy_director"])),
 ):
     year = year or datetime.now().year
     records = _workload_records(db, year)
