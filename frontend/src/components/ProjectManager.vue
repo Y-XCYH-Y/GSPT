@@ -607,7 +607,6 @@
 
 
 
-      <div class="form-row"><label>计划工天</label><span style="padding:6px 0;color:#059669">{{ calcPlannedWorkdays() }}</span></div>
 
 
 
@@ -795,7 +794,6 @@
           <span class="pm-meta-item"><b>规模</b><span>{{ p.area }} m²</span></span>
           <span class="pm-meta-item"><b>阶段</b><span>{{ p.current_stage || "—" }}</span></span>
           <span class="pm-meta-item"><b>负责人</b><span>{{ leaderName(p) }}</span></span>
-          <span class="pm-meta-item"><b>预估工天</b><span>{{ calcProjectWorkdays(p) }}</span></span>
           <span class="pm-meta-item"><b>起止</b><span>{{ p.start_date || "—" }} ~ {{ p.planned_end_date || "—" }}</span></span>
         </div>
 
@@ -980,7 +978,6 @@
 
 
 
-<div><span class="dl">计划工天</span><span class="dv">{{ calcProjectWorkdays(p) }}</span></div>
 
 
 
@@ -2971,87 +2968,6 @@ function leaderName(p) {
 
 
 
-function calcProjectWorkdays(p) {
-
-
-
-
-
-
-
-
-
-  var stage = p.current_stage || "方案设计"
-
-
-
-
-
-
-
-
-
-  var type = p.project_type
-
-
-
-
-
-
-
-
-
-  var ratios = type === "大铁"
-
-
-
-
-
-
-
-
-
-    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "施工图设计": 0.55, "施工配合": 0.077 }
-
-
-
-
-
-
-
-
-
-    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "施工图设计": 0.50, "施工配合": 0.077 }
-
-
-
-
-
-
-
-
-
-  var b = ratios[stage] || 0
-
-
-
-
-
-
-
-
-
-  return Math.round((p.planned_man_days || 0) * b)
-
-
-
-
-
-
-
-
-
-}
 
 
 
@@ -3121,87 +3037,6 @@ function statusLabel(status) {
 
 
 
-function calcPlannedWorkdays() {
-
-
-
-
-
-
-
-
-
-  var stage = np.value.current_stage || "方案设计"
-
-
-
-
-
-
-
-
-
-  var type = np.value.project_type
-
-
-
-
-
-
-
-
-
-  var ratios = type === "大铁"
-
-
-
-
-
-
-
-
-
-    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "施工图设计": 0.55, "施工配合": 0.077 }
-
-
-
-
-
-
-
-
-
-    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "施工图设计": 0.50, "施工配合": 0.077 }
-
-
-
-
-
-
-
-
-
-  var b = ratios[stage] || 0
-
-
-
-
-
-
-
-
-
-  return Math.round((np.value.planned_man_days || 0) * b)
-
-
-
-
-
-
-
-
-
-}
 
 
 

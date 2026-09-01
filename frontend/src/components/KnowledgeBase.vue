@@ -103,7 +103,6 @@
           <div class="kb-item-body">
             <span>类型：{{ p.project_type }}</span>
             <span>面积：{{ p.area }}&#x33A1;</span>
-            <span>计划工天：{{ calcPlannedWorkdays(p) }}</span>
             <span v-if="p.memberCount">成员：{{ p.memberCount }}人</span>
           </div>
         </div>
@@ -126,15 +125,6 @@ const { employees } = storeToRefs(employeeStore)
 const workloads = ref([])
 const activeProjects = ref([])
 
-function calcPlannedWorkdays(p) {
-  var stage = p.stage || p.current_stage || "方案设计"
-  var type = p.project_type
-  var ratios = type === "大铁"
-    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "施工配合": 0.077 }
-    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "施工配合": 0.077 }
-  var b = ratios[stage] || 0
-  return Math.round((p.planned_man_days || 0) * b)
-}
 const wlSearchQuery = ref("")
 const expandedWl = ref({})
 
