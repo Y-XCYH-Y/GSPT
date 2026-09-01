@@ -704,13 +704,21 @@ function canManageSelectedProject() {
   return authStore.isDirector || authStore.user?.id === p.project_leader_id
 }
 
-function openScoreAlloc() {
+async function openScoreAlloc() {
   if (!scoreProjectId.value) { alert("请先选择项目"); return }
   var p = scoreProjects.value.find(function(x) { return x.id === scoreProjectId.value })
   if (!p) return
   var stage = p.current_stage || "方案设计"
   var b = calcStageRatio(stage, p.project_type)
-  p.G = Math.round((p.planned_man_days || 0) * b)
+  var base = p.planned_man_days || 0
+  try {
+    if (currentAssessmentId.value) {
+      const wd = await performanceAPI.getWorkdays(currentAssessmentId.value)
+      const rec = (wd.data || []).find(function(x) { return x.project_name === p.project_name })
+      if (rec && rec.A !== undefined && rec.A !== null) base = Number(rec.A) || 0
+    }
+  } catch(e) {}
+  p.G = Math.round((base || 0) * b)
   openAllocDialog(p)
 }
 
@@ -865,7 +873,7 @@ const allocatedDays = computed(() => {
 })
 
 const unallocatedDays = computed(() => {
-  var avail = (remainingG.value || 0) * (currentStagePct.value || 0)
+  var avail = (remainingG.value || 0)
   var totalAvail = Math.round(avail)
   return Math.max(0, totalAvail - allocatedDays.value)
 })
@@ -893,7 +901,7 @@ function calcLv1FromMembers() {
   lv1.reviewer = roleSubTotal("复核人")
 }
 function computeDaysForMember(m) {
-  var avail = (remainingG.value || 0) * (currentStagePct.value || 0)
+  var avail = (remainingG.value || 0)
   var exact = avail * ((m.pct || 0) / 100)
   return { exact: exact, rounded: Math.round(exact) }
 }
@@ -928,7 +936,7 @@ function onPctChange() {
 }
 
 function onDaysChange(roleName, lv1Key, m) {
-  var avail = (remainingG.value || 0) * (currentStagePct.value || 0)
+  var avail = (remainingG.value || 0)
   if (avail > 0) {
     m.pct = Math.round(Math.max(0, (m.days || 0) * 100 / avail) * 10) / 10
   } else if ((m.days || 0) === 0) {
