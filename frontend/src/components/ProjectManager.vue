@@ -148,7 +148,7 @@
 
 
 
-      <div class="form-row"><label>项目编号</label><input v-model="np.project_code" placeholder="项目编号" /><span class="form-hint">集团或院计表编号</span></div>
+      <div class="form-row"><label>项目编号</label><input v-model="np.project_code" placeholder="集团或院计表编号" /></div>
 
 
 
@@ -567,7 +567,7 @@
 
 
 
-      <div class="form-row"><label>开始日期</label><input v-model="np.start_date" type="date" /></div>
+      <div class="form-row"><label>开始日期</label><div class="date-field"><input v-model="np.start_date" type="date" :class="{ 'has-value': !!np.start_date }" /><span v-if="!np.start_date" class="date-field-ph">开始日期</span></div></div>
 
 
 
@@ -582,7 +582,7 @@
 
 
 
-      <div class="form-row"><label>预计结束日期</label><input v-model="np.planned_end_date" type="date" /></div>
+      <div class="form-row"><label>预计结束日期</label><div class="date-field"><input v-model="np.planned_end_date" type="date" :class="{ 'has-value': !!np.planned_end_date }" /><span v-if="!np.planned_end_date" class="date-field-ph">预计结束日期</span></div></div>
 
 
 
@@ -7304,7 +7304,11 @@ onMounted(() => { loadProjects(); loadPool() })
 
 .form-row label { width: 100px; font-size: 13px; color: #475569; flex-shrink: 0; }
 
-.form-hint { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+.date-field { position: relative; flex: 1; min-width: 140px; }
+.date-field input { width: 100%; min-width: 0; }
+.date-field input::-webkit-datetime-edit { color: transparent; }
+.date-field input.has-value::-webkit-datetime-edit { color: #1e293b; }
+.date-field-ph { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #94a3b8; pointer-events: none; white-space: nowrap; }
 
 
 
