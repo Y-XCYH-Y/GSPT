@@ -54,7 +54,7 @@
         </div>
         <div class="pa-scroll" v-if="myProjects.length && currentAssessmentId">
           <table class="pa-table">
-            <thead><tr><th>项目</th><th>类型</th><th>基本工天</th><th>阶段比例</th><th>复杂程度</th><th>质量系数</th><th>进展系数</th><th>修正系数</th><th>工天</th><th>操作</th></tr></thead>
+            <thead><tr><th>项目</th><th>类型</th><th>暂估工天</th><th>阶段比例</th><th>复杂程度</th><th>质量系数</th><th>进展系数</th><th>修正系数</th><th>工天</th><th>操作</th></tr></thead>
             <tbody>
               <tr v-for="(p, idx) in myProjects" :key="p.id || idx">
                 <td>{{ p.project_name || "-" }}</td><td>{{ p.project_type || "-" }}</td>
@@ -439,7 +439,7 @@ async function loadScores() {
 }
 
 function allocStageRatio(stage) {
-  var ratios = { "方案设计": 0.05, "初步设计": 0.36, "施工图": 0.30, "施工配合": 0.38 }
+  var ratios = { "方案设计": 0.05, "初步设计": 0.36, "施工图": 0.30, "施工图设计": 0.30, "施工配合": 0.38 }
   return ratios[stage] || 0
 }
 
@@ -447,8 +447,8 @@ function calcStageRatio(stage, projectType) {
   if (!stage) stage = "方案设计"
   var isRailway = projectType === "大铁"
   var ratios = isRailway
-    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "施工配合": 0.077 }
-    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "施工配合": 0.077 }
+    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "施工图设计": 0.55, "施工配合": 0.077 }
+    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "施工图设计": 0.50, "施工配合": 0.077 }
   return ratios[stage] || 0
 }
 
@@ -895,6 +895,7 @@ const stageData = computed(() => [
   { name: "方案设计", pct: 0.05 },
   { name: "初步设计", pct: 0.36 },
   { name: "施工图", pct: 0.30 },
+  { name: "施工图设计", pct: 0.30 },
   { name: "施工配合", pct: 0.38 },
 ])
 

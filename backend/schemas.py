@@ -73,6 +73,8 @@ class ProjectCreate(BaseModel):
     current_stage: Optional[str] = "方案设计"
     drawing_list: Optional[list] = []
     description: Optional[str] = None
+    work_rounds: int = 1
+    round_reason: Optional[str] = None
 
 class ProjectResponse(BaseModel):
     id: int
@@ -90,6 +92,9 @@ class ProjectResponse(BaseModel):
     current_stage: Optional[str] = None
     project_leader_id: Optional[int] = None
     description: Optional[str]
+    drawing_list: Optional[list] = []
+    work_rounds: int = 1
+    round_reason: Optional[str] = None
     current_stage: Optional[str] = None
     project_leader_id: Optional[int] = None
     created_at: datetime
@@ -497,9 +502,14 @@ class ProjectRequestCreate(BaseModel):
     start_date: Optional[str] = None
     planned_end_date: Optional[str] = None
     planned_man_days: float = 0
+    description: Optional[str] = None
+    drawing_list: Optional[list] = []
+    work_rounds: int = 1
+    round_reason: Optional[str] = None
 
 class ProjectRequestResponse(BaseModel):
     id: int
+    project_code: str = ""
     project_name: str
     project_type: str
     area: float
@@ -507,6 +517,10 @@ class ProjectRequestResponse(BaseModel):
     start_date: Optional[str] = None
     planned_end_date: Optional[str] = None
     planned_man_days: float
+    description: Optional[str] = None
+    drawing_list: Optional[list] = []
+    work_rounds: int = 1
+    round_reason: Optional[str] = None
     status: str
     requested_by: Optional[int] = None
     requester_name: Optional[str] = None

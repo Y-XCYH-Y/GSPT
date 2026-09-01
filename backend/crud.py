@@ -58,7 +58,7 @@ def get_projects(db: Session) -> List[models.Project]:
     db_path = os.path.join(os.path.dirname(__file__), "building_institute.db")
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    rows = conn.execute("SELECT id, project_name, project_type, area, status, start_date, planned_end_date, actual_end_date, planned_man_days, actual_man_days, alert_level, description, created_by, project_leader_id, current_stage, drawing_list, is_official FROM projects").fetchall()
+    rows = conn.execute("SELECT id, project_code, project_name, project_type, area, status, start_date, planned_end_date, actual_end_date, planned_man_days, actual_man_days, alert_level, description, work_rounds, round_reason, created_by, project_leader_id, current_stage, drawing_list, is_official FROM projects").fetchall()
     conn.close()
     result = []
     for r in rows:
@@ -1235,6 +1235,10 @@ def create_project_request(db: Session, data: dict, user_id: int):
         start_date=_start,
         planned_end_date=_end,
         planned_man_days=req.planned_man_days,
+        description=req.description,
+        drawing_list=req.drawing_list or [],
+        work_rounds=req.work_rounds or 1,
+        round_reason=req.round_reason,
         created_by=user_id,
         project_leader_id=user_id,
         current_stage=req.stage,
@@ -1270,7 +1274,9 @@ def get_project_requests(db: Session, status: str = None, user_id: int = None):
         rev_user = db.query(models.User).filter(models.User.id == r.reviewer_id).first() if r.reviewer_id else None
         out.append({
             "id": r.id, "project_id": r.project_id, "project_name": r.project_name, "project_type": r.project_type,
-            "area": r.area, "stage": r.stage, "start_date": r.start_date,
+            "area": r.area, "stage": r.stage, "start_date": r.start_date, "project_code": r.project_code or "",
+            "description": r.description, "drawing_list": r.drawing_list or [],
+            "work_rounds": r.work_rounds or 1, "round_reason": r.round_reason,
             "planned_end_date": r.planned_end_date, "planned_man_days": r.planned_man_days,
             "status": r.status, "requested_by": r.requested_by,
             "requester_name": req_user.name if req_user else "",
@@ -1306,6 +1312,10 @@ def approve_project_request(db: Session, request_id: int, reviewer_id: int):
             area=req.area, status="planning", start_date=_start,
             planned_end_date=_end,
             planned_man_days=req.planned_man_days,
+            description=req.description,
+            drawing_list=req.drawing_list or [],
+            work_rounds=req.work_rounds or 1,
+            round_reason=req.round_reason,
             created_by=req.requested_by, project_leader_id=req.requested_by,
             current_stage=req.stage
         )
@@ -1317,6 +1327,10 @@ def approve_project_request(db: Session, request_id: int, reviewer_id: int):
     proj.project_code = req.project_code or proj.project_code
     proj.project_type = req.project_type
     proj.area = req.area
+    proj.description = req.description
+    proj.drawing_list = req.drawing_list or []
+    proj.work_rounds = req.work_rounds or 1
+    proj.round_reason = req.round_reason
     proj.current_stage = req.stage
     proj.start_date = _start
     proj.planned_end_date = _end

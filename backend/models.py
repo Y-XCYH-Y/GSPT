@@ -87,12 +87,14 @@ class Project(Base):
     start_date = Column(Date)
     planned_end_date = Column(Date)
     actual_end_date = Column(Date)
-    planned_man_days = Column(Float, default=0)  # 基本工天（用于计算计划工天）
-    drawing_list = Column(JSON, default=list)  # 图名清单 [{name, area, personnel, remark}]
+    planned_man_days = Column(Float, default=0)  # 暂估工天（用于计算计划工天）
+    drawing_list = Column(JSON, default=list)  # 分工清单 [{name, area, personnel, remark}]
     actual_man_days = Column(Float, default=0)   # 实际人天
     is_official = Column(Boolean, default=True)
     alert_level = Column(Enum(AlertLevel), default=AlertLevel.GREEN)
     description = Column(Text)
+    work_rounds = Column(Integer, default=1)  # 工作轮次
+    round_reason = Column(Text)  # 多轮修改原因
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -361,6 +363,10 @@ class ProjectRequest(Base):
     start_date = Column(String(20))
     planned_end_date = Column(String(20))
     planned_man_days = Column(Float, default=0)
+    description = Column(Text)
+    drawing_list = Column(JSON, default=list)
+    work_rounds = Column(Integer, default=1)
+    round_reason = Column(Text)
     status = Column(String(20), default="pending")
     requested_by = Column(Integer, ForeignKey("users.id"))
     project_id = Column(Integer, nullable=True)

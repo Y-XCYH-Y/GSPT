@@ -148,7 +148,7 @@
 
 
 
-      <div class="form-row"><label>项目编号</label><input v-model="np.project_code" placeholder="项目编号" /></div>
+      <div class="form-row"><label>项目编号</label><input v-model="np.project_code" placeholder="项目编号" /><span class="form-hint">集团或院计表编号</span></div>
 
 
 
@@ -448,7 +448,9 @@
 
 
 
+          <option value="投标">投标</option>
           <option value="方案设计">方案设计</option>
+          <option value="可研">可研</option>
 
 
 
@@ -478,7 +480,7 @@
 
 
 
-          <option value="施工图">施工图</option>
+          <option value="施工图设计">施工图设计</option>
 
 
 
@@ -494,6 +496,9 @@
 
 
           <option value="施工配合">施工配合</option>
+          <option value="变更设计">变更设计</option>
+          <option value="清概">清概</option>
+          <option value="咨询">咨询</option>
 
 
 
@@ -540,6 +545,15 @@
 
       <div class="form-row"><label>规模 (m²)</label><input v-model.number="np.area" type="number" placeholder="0" /></div>
 
+      <div class="form-row"><label>工作描述</label><input v-model="np.description" placeholder="主要工作内容，单体数量，业主要求等" /></div>
+
+      <div class="form-row"><label>工作轮次</label>
+        <select v-model.number="np.work_rounds">
+          <option v-for="n in 5" :key="n" :value="n">{{ n }}</option>
+        </select>
+      </div>
+      <div v-if="np.work_rounds !== 1" class="form-row"><label>多轮修改原因</label><input v-model="np.round_reason" placeholder="请填写多轮修改原因" /></div>
+
 
 
 
@@ -583,7 +597,7 @@
 
 
 
-      <div class="form-row"><label>基本工天</label><input v-model.number="np.planned_man_days" type="number" placeholder="0" /></div>
+      <div class="form-row"><label>暂估工天</label><input v-model.number="np.planned_man_days" type="number" placeholder="0" /></div>
 
 
 
@@ -924,6 +938,9 @@
 
 
 <div><span class="dl">阶段</span><span class="dv">{{ p.current_stage || "-" }}</span></div>
+<div v-if="p.description"><span class="dl">工作描述</span><span class="dv">{{ p.description }}</span></div>
+<div><span class="dl">工作轮次</span><span class="dv">{{ p.work_rounds || 1 }}</span></div>
+<div v-if="p.work_rounds && p.work_rounds !== 1"><span class="dl">多轮修改原因</span><span class="dv">{{ p.round_reason || "-" }}</span></div>
 
 
 
@@ -953,7 +970,7 @@
 
 
 
-<div><span class="dl">基本工天</span><span class="dv">{{ p.planned_man_days || 0 }}</span></div>
+<div><span class="dl">暂估工天</span><span class="dv">{{ p.planned_man_days || 0 }}</span></div>
 
 
 
@@ -1017,7 +1034,7 @@
           <h5>1. 项目负责人 <span class="sec-count">({{ leaderMems(p.id).length }})</span></h5>
           <div v-if="leaderMems(p.id).length === 0" class="sec-empty">暂无</div>
           <table v-else class="mem-tbl">
-            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>图名</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
+            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>分工</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
             <tbody>
               <tr v-for="m in leaderMems(p.id)" :key="m.id || m.key">
                 <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td><td>{{ memberDrawingName(p, m) }}</td><td>{{ memberDrawingArea(p, m) }}</td><td></td>
@@ -1032,7 +1049,7 @@
           <h5>2. 专业负责人 <span class="sec-count">({{ proLeadMems(p.id).length }})</span></h5>
           <div v-if="proLeadMems(p.id).length === 0" class="sec-empty">暂无</div>
           <table v-else class="mem-tbl">
-            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>图名</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
+            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>分工</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
             <tbody>
               <tr v-for="m in proLeadMems(p.id)" :key="m.id || m.key">
                 <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.department || "-" }}</td><td>{{ memberDrawingName(p, m) }}</td><td>{{ memberDrawingArea(p, m) }}</td><td></td>
@@ -1089,7 +1106,7 @@
 
 
 
-            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>图名</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
+            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>分工</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
 
 
 
@@ -1314,7 +1331,7 @@
 
 
 
-            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>图名</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
+            <thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>分工</th><th>建筑面积</th><th></th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
 
 
 
@@ -1539,7 +1556,7 @@
 
 
 
-<thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>图名</th><th>建筑面积</th><th>角色</th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
+<thead><tr><th>工号</th><th>姓名</th><th>部门</th><th>分工</th><th>建筑面积</th><th>角色</th><th>备注</th><th>分配工天</th><th>操作</th></tr></thead>
 
 
 
@@ -2154,7 +2171,7 @@
 
 
 
-    <input v-model="mdrawing[p.id]" placeholder="图名" />
+    <input v-model="mdrawing[p.id]" placeholder="分工" />
     <input v-model.number="marea[p.id]" type="number" placeholder="建筑面积" />
     <input v-model="mnote[p.id]" placeholder="备注" />
     <button class="pm-btn pm-btn-sm pm-btn-primary" @click="addMem(p.id)">添加</button>
@@ -2776,7 +2793,7 @@ const mnote = ref({})
 
 
 
-const np = ref({ project_code: "", project_name: "", project_type: "民建", area: 0, status: "planning", start_date: "", planned_end_date: "", planned_man_days: 0, current_stage: "方案设计", drawing_list: [] })
+const np = ref({ project_code: "", project_name: "", project_type: "民建", area: 0, status: "planning", start_date: "", planned_end_date: "", planned_man_days: 0, current_stage: "方案设计", description: "", work_rounds: 1, round_reason: "", drawing_list: [] })
 
 
 
@@ -2904,7 +2921,7 @@ async function saveProjectDrawingList(p) {
   }
 }
 
-function resetNp() { np.value = { project_code: "", project_name: "", project_type: "民建", area: 0, status: "planning", start_date: "", planned_end_date: "", planned_man_days: 0, current_stage: "方案设计", drawing_list: [] } }
+function resetNp() { np.value = { project_code: "", project_name: "", project_type: "民建", area: 0, status: "planning", start_date: "", planned_end_date: "", planned_man_days: 0, current_stage: "方案设计", description: "", work_rounds: 1, round_reason: "", drawing_list: [] } }
 
 
 
@@ -2994,7 +3011,7 @@ function calcProjectWorkdays(p) {
 
 
 
-    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "施工配合": 0.077 }
+    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "施工图设计": 0.55, "施工配合": 0.077 }
 
 
 
@@ -3004,7 +3021,7 @@ function calcProjectWorkdays(p) {
 
 
 
-    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "施工配合": 0.077 }
+    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "施工图设计": 0.50, "施工配合": 0.077 }
 
 
 
@@ -3144,7 +3161,7 @@ function calcPlannedWorkdays() {
 
 
 
-    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "施工配合": 0.077 }
+    ? { "方案设计": 0.02, "初步设计": 0.353, "施工图": 0.55, "施工图设计": 0.55, "施工配合": 0.077 }
 
 
 
@@ -3154,7 +3171,7 @@ function calcPlannedWorkdays() {
 
 
 
-    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "施工配合": 0.077 }
+    : { "方案设计": 0.12, "初步设计": 0.303, "施工图": 0.50, "施工图设计": 0.50, "施工配合": 0.077 }
 
 
 
@@ -4302,7 +4319,7 @@ async function handleCreateProject() {
 
 
 
-  const body = { project_code: np.value.project_code, project_name: np.value.project_name, project_type: np.value.project_type, area: np.value.area || 0, stage: np.value.current_stage || "方案设计", start_date: np.value.start_date, planned_end_date: np.value.planned_end_date, planned_man_days: np.value.planned_man_days || 0, drawing_list: np.value.drawing_list || [] }
+  const body = { project_code: np.value.project_code, project_name: np.value.project_name, project_type: np.value.project_type, area: np.value.area || 0, stage: np.value.current_stage || "方案设计", start_date: np.value.start_date, planned_end_date: np.value.planned_end_date, planned_man_days: np.value.planned_man_days || 0, description: np.value.description || "", work_rounds: np.value.work_rounds || 1, round_reason: np.value.round_reason || "", drawing_list: np.value.drawing_list || [] }
 
 
 
@@ -7286,6 +7303,8 @@ onMounted(() => { loadProjects(); loadPool() })
 
 
 .form-row label { width: 100px; font-size: 13px; color: #475569; flex-shrink: 0; }
+
+.form-hint { font-size: 12px; color: #94a3b8; white-space: nowrap; }
 
 
 

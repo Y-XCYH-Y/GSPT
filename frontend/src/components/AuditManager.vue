@@ -32,7 +32,7 @@
       <div class="am-panel-head">工天修改申请</div>
       <div class="am-scroll" v-if="workdayRequests.length">
         <table class="am-table">
-          <thead><tr><th>申请人</th><th>项目</th><th>基本工天(A)</th><th>等级系数(B)</th><th>复杂程度(C)</th><th>质量系数(D)</th><th>进展系数(E)</th><th>修正系数(F)</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr><th>申请人</th><th>项目</th><th>暂估工天(A)</th><th>等级系数(B)</th><th>复杂程度(C)</th><th>质量系数(D)</th><th>进展系数(E)</th><th>修正系数(F)</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="r in workdayRequests" :key="r.id">
               <td>{{ r.user_name }}</td><td>{{ r.project_name }}</td>
