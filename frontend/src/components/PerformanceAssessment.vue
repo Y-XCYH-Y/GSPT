@@ -59,7 +59,18 @@
               <tr v-for="(p, idx) in myProjects" :key="p.id || idx">
                 <td>{{ p.project_name || "-" }}</td><td>{{ p.project_type || "-" }}</td>
                 <td><input v-model.number="p.A" type="number" step="0.5" min="0" class="input score-input" @input="calcG(p)" :disabled="!p.can_edit" /></td>
-                <td><strong>{{ (calcStageRatio(p.stage, p.project_type) * 100).toFixed(1) }}%</strong><br><span style="font-size:10px;color:#94a3b8">{{ p.stage || "方案设计" }}</span></td>
+                <td>
+                  <select v-if="p.can_edit" :value="p.stageRatioCustom ? '__custom__' : String(p.B)" class="input score-input" @change="onStageRatioChange(p, $event)" :disabled="!p.can_edit">
+                    <option v-for="opt in stageRatioOptions(p)" :key="opt.value" :value="String(opt.value)">{{ opt.label }}</option>
+                    <option value="__custom__">其他</option>
+                  </select>
+                  <div v-if="p.can_edit && p.stageRatioCustom" style="margin-top:4px">
+                    <input v-model.number="p.B" type="number" step="0.001" min="0" max="2" class="input score-input" style="width:90px" @input="calcG(p)" placeholder="比例" />
+                  </div>
+                  <template v-else-if="!p.can_edit">
+                    <strong>{{ fmtRatio(p.B) }}</strong><br><span style="font-size:10px;color:#94a3b8">{{ p.stage || "方案设计" }}</span>
+                  </template>
+                </td>
                 <td>
                   <select v-model.number="p.C" class="input score-input" @change="calcG(p)" :disabled="!p.can_edit">
                     <option :value="0.8">简单 0.8</option><option :value="1.0">一般 1.0</option>
@@ -427,8 +438,13 @@ async function loadScores() {
     r.data.forEach(s => { saved[s.project_name] = s })
     myProjects.value.forEach(p => {
       const s = saved[p.project_name]
-      if (s) { p.A = Number(s.A); p.B = calcStageRatio(p.stage, p.project_type); p.C = Number(s.C); p.D = Number(s.D); p.E = Number(s.E); p.F = Number(s.F); p.G = Math.round(Number(s.G)); p.savedId = s.id }
-      else { p.A = Number(p.A || 1); p.B = calcStageRatio(p.stage, p.project_type); p.C = Number(p.C || 1); p.D = Number(p.D || 1); p.E = Number(p.E || 1); p.F = Number(p.F || 1); p.savedId = undefined; calcG(p) }
+      if (s) {
+        p.A = Number(s.A)
+        p.B = s.B !== undefined && s.B !== null && s.B !== "" ? Number(s.B) : calcStageRatio(p.stage, p.project_type)
+        p.stageRatioCustom = !isPresetStageRatio(p, p.B)
+        p.C = Number(s.C); p.D = Number(s.D); p.E = Number(s.E); p.F = Number(s.F); p.G = Math.round(Number(s.G)); p.savedId = s.id
+      }
+      else { p.A = Number(p.A || 1); p.B = calcStageRatio(p.stage, p.project_type); p.stageRatioCustom = false; p.C = Number(p.C || 1); p.D = Number(p.D || 1); p.E = Number(p.E || 1); p.F = Number(p.F || 1); p.savedId = undefined; calcG(p) }
     })
     // Load workday requests to check pending status
     const reqs = (await api.get("/performance/workday-requests")).data
@@ -452,9 +468,48 @@ function calcStageRatio(stage, projectType) {
   return ratios[stage] || 0
 }
 
+function stageRatioOptions(p) {
+  var isRailway = (p.project_type || "") === "大铁"
+  return isRailway
+    ? [
+        { label: "方案设计 2.0%", value: 0.02 },
+        { label: "初步设计 35.3%", value: 0.353 },
+        { label: "施工图设计 55.0%", value: 0.55 },
+        { label: "施工配合 7.7%", value: 0.077 }
+      ]
+    : [
+        { label: "方案设计 12.0%", value: 0.12 },
+        { label: "初步设计 30.3%", value: 0.303 },
+        { label: "施工图设计 50.0%", value: 0.50 },
+        { label: "施工配合 7.7%", value: 0.077 }
+      ]
+}
+
+function isPresetStageRatio(p, b) {
+  var n = Number(b)
+  return stageRatioOptions(p).some(function(opt) { return Math.abs(opt.value - n) < 0.000001 })
+}
+
+function fmtRatio(v) {
+  var n = Number(v)
+  if (!isFinite(n)) return "0.0%"
+  return (n * 100).toFixed(1) + "%"
+}
+
+function onStageRatioChange(p, ev) {
+  var v = ev.target.value
+  if (v === "__custom__") {
+    p.stageRatioCustom = true
+    if (p.B === undefined || p.B === null || p.B === 0) p.B = calcStageRatio(p.stage, p.project_type)
+  } else {
+    p.stageRatioCustom = false
+    p.B = Number(v)
+  }
+  calcG(p)
+}
+
 function calcG(p) {
-  var s = p.stage || "方案设计"
-  var b = calcStageRatio(s, p.project_type)
+  var b = p.B !== undefined && p.B !== null ? Number(p.B) : calcStageRatio(p.stage || "方案设计", p.project_type)
   p.G = Math.round((p.A || 0) * b * (p.C || 1) * (p.D || 1) * (p.E || 1) * (p.F || 1))
 }
 
@@ -478,7 +533,7 @@ async function saveScore(p) {
     await api.post("/create-request", {
       assessment_id: currentAssessmentId.value,
       project_name: p.project_name,
-      A: p.A || 0, B: calcStageRatio(p.stage, p.project_type), C: p.C || 1,
+      A: p.A || 0, B: p.B || 0, C: p.C || 1,
       D: p.D || 1, E: p.E || 1, F: p.F || 1
     })
     p.hasPendingRequest = true
@@ -492,7 +547,7 @@ async function saveScore(p) {
       assessment_id: parseInt(currentAssessmentId.value),
       user_id: authStore.user?.id || 0,
       project_name: p.project_name, project_type: p.project_type,
-      A: p.A || 0, B: calcStageRatio(p.stage, p.project_type), C: p.C || 1, D: p.D || 1, E: p.E || 1, F: p.F || 1
+      A: p.A || 0, B: p.B || 0, C: p.C || 1, D: p.D || 1, E: p.E || 1, F: p.F || 1
     })
     await loadScores()
   } catch(e) { console.error(e); alert("????: " + (e.message || "????")) }
