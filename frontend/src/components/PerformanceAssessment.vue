@@ -54,11 +54,11 @@
         </div>
         <div class="pa-scroll" v-if="myProjects.length && currentAssessmentId">
           <table class="pa-table">
-            <thead><tr><th>项目</th><th>类型</th><th>暂估工天</th><th>阶段比例</th><th>复杂程度</th><th>质量系数</th><th>进展系数</th><th>修正系数</th><th>工天</th><th>操作</th></tr></thead>
+            <thead><tr><th>项目</th><th>类型</th><th>暂估工天</th><th>基本工天</th><th>阶段比例</th><th>复杂程度</th><th>质量系数</th><th>进展系数</th><th>修正系数</th><th>工天</th><th>操作</th></tr></thead>
             <tbody>
               <tr v-for="(p, idx) in myProjects" :key="p.id || idx">
                 <td>{{ p.project_name || "-" }}</td><td>{{ p.project_type || "-" }}</td>
-                <td><input v-model.number="p.A" type="number" step="0.5" min="0" class="input score-input" @input="calcG(p)" :disabled="!p.can_edit" /></td>
+                <td>{{ p.planned_man_days ?? "-" }}</td><td><input v-model.number="p.A" type="number" step="0.5" min="0" class="input score-input" @input="calcG(p)" :disabled="!p.can_edit" /></td>
                 <td>
                   <select v-if="p.can_edit" :value="p.stageRatioCustom ? '__custom__' : String(p.B)" class="input score-input" @change="onStageRatioChange(p, $event)" :disabled="!p.can_edit">
                     <option v-for="opt in stageRatioOptions(p)" :key="opt.value" :value="String(opt.value)">{{ opt.label }}</option>

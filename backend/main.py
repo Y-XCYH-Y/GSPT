@@ -2186,6 +2186,8 @@ def get_my_projects(
 
 
 
+    proj_by_name = {_p.project_name: _p for _p in db.query(models.Project).all()}
+
     _result = []
 
     for _key, _val in result_map.items():
@@ -2203,6 +2205,10 @@ def get_my_projects(
         _val["can_edit"] = _can_edit
 
         _val["is_participant"] = _val.get("role") != "所长查看"
+
+        _pobj = proj_by_name.get(_key)
+
+        _val["planned_man_days"] = _pobj.planned_man_days if _pobj else 0
 
         _result.append(_val)
 
