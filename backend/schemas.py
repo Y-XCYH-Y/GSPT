@@ -63,6 +63,7 @@ class SkillMatrixResponse(SkillMatrixBase):
 # 项目相关
 class ProjectCreate(BaseModel):
     project_code: str = ""
+    group_code: str = ""
     project_name: str
     project_type: str
     area: float
@@ -79,6 +80,7 @@ class ProjectCreate(BaseModel):
 class ProjectResponse(BaseModel):
     id: int
     project_code: str = ""
+    group_code: str = ""
     project_name: str
     project_type: str
     area: float
@@ -276,6 +278,7 @@ class PerformanceAssessmentCreate(BaseModel):
     name: Optional[str] = None
     bonus_total: float = 0.0
     gamma: float = 1.0
+    peer_review_open: bool = False
 
 class PerformanceAssessmentResponse(BaseModel):
     id: int
@@ -284,6 +287,7 @@ class PerformanceAssessmentResponse(BaseModel):
     status: str
     bonus_total: float
     gamma: float
+    peer_review_open: bool = False
     created_at: datetime
 
     class Config:
@@ -495,6 +499,7 @@ PROJECT_ROLES = [
 
 class ProjectRequestCreate(BaseModel):
     project_code: str = ""
+    group_code: str = ""
     project_name: str
     project_type: str = "民建"
     area: float = 0
@@ -510,6 +515,7 @@ class ProjectRequestCreate(BaseModel):
 class ProjectRequestResponse(BaseModel):
     id: int
     project_code: str = ""
+    group_code: str = ""
     project_name: str
     project_type: str
     area: float

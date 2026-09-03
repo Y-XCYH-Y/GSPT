@@ -78,6 +78,7 @@ class Project(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     project_code = Column(String(200), default="", comment="????")
+    group_code = Column(String(100), default="", comment="集团编号（仅信息）")
     project_name = Column(String(200), nullable=False)
     project_type = Column(String(100), nullable=False)  # 项目类型
     area = Column(Float, nullable=False)  # 建筑面积(㎡)
@@ -213,6 +214,7 @@ class PerformanceAssessment(Base):
     status = Column(String(20), default="进行中")
     bonus_total = Column(Float, default=0.0)
     gamma = Column(Float, default=1.0)
+    peer_review_open = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -356,6 +358,7 @@ class ProjectRequest(Base):
     __tablename__ = "project_requests"
     id = Column(Integer, primary_key=True, index=True)
     project_code = Column(String(200), default="", comment="????")
+    group_code = Column(String(100), default="", comment="集团编号（仅信息）")
     project_name = Column(String(200), nullable=False)
     project_type = Column(String(100), default="民建")
     area = Column(Float, default=0)

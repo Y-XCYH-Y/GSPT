@@ -37,7 +37,8 @@
             </td>
             <td v-if="isDirector">
               <button class="btn btn-sm btn-info" @click="$emit('edit', emp)">编辑</button>
-              <button class="btn btn-sm btn-danger" @click="$emit('delete', emp.id)" style="margin-left:4px">删除</button>
+              <button v-if="emp.id !== currentUserId" class="btn btn-sm btn-danger" @click="$emit('delete', emp.id)" style="margin-left:4px">删除</button>
+              <button v-else class="btn btn-sm btn-danger" disabled title="不能删除自己的账号" style="margin-left:4px">删除</button>
             </td>
           </tr>
           <tr v-if="expanded[emp.id]" class="detail-row">
@@ -98,7 +99,8 @@ import { reactive } from "vue"
 const props = defineProps({
   employees: { type: Array, default: () => [] },
   empProjectMap: { type: Object, default: () => ({}) },
-  isDirector: { type: Boolean, default: false }
+  isDirector: { type: Boolean, default: false },
+  currentUserId: { type: Number, default: null }
 })
 const emit = defineEmits(["edit", "delete", "updateLoad"])
 

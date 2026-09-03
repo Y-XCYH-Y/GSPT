@@ -36,6 +36,7 @@
       :employees="filteredEmployees" 
       :emp-project-map="empProjectMap"
       :isDirector="authStore.isDirector"
+      :currentUserId="authStore.user?.id"
       @edit="editEmployee"
       @delete="handleDelete"
     />
@@ -165,6 +166,10 @@ async function handleSave(formData) {
 }
 
 async function handleDelete(id) {
+  if (id === authStore.user?.id) {
+    showNotification("不能删除自己的账号", "error", 5000)
+    return
+  }
   if (!confirm('确定删除该员工吗?')) return
   try {
     await employeeAPI.delete(id)

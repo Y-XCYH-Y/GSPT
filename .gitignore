@@ -31,4 +31,9 @@ temp_update_main.py
 .env.*
 *.local
 
-# Vite cache.vite/
+# Vite cache
+.vite/
+
+# Local archives and database backups
+*.zip
+*.db.bak-*

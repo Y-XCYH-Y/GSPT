@@ -47,6 +47,8 @@ export const performanceAPI = {
   getMyProjects: () => api.get('/performance/my-projects'),
   getAssessments: () => api.get('/performance/assessments'),
   createAssessment: (data) => api.post('/performance/assessments', data),
+  setPeerReview: (id, open) => api.put('/performance/assessments/' + id + '/peer-review', { open }),
+  getWorkdaySummary: (aid) => api.get('/performance/workday-summary?assessment_id=' + aid),
   getWorkdays: (aid) => api.post('/performance/workday-list', { assessment_id: aid }),
   createWorkday: (data) => api.post('/performance/workdays', data),
   deleteWorkday: (id) => api.delete('/performance/workdays/' + id),

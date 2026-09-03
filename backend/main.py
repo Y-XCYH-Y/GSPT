@@ -98,11 +98,24 @@ async def lifespan(app: FastAPI):
             db.execute(text("ALTER TABLE projects ADD COLUMN is_official BOOLEAN DEFAULT 1"))
             db.commit()
             print("提示: 已添加 is_official 列")
+        if "group_code" not in cols2:
+            db.execute(text("ALTER TABLE projects ADD COLUMN group_code VARCHAR(100) DEFAULT ''"))
+            db.commit()
+            print("提示: 已添加 projects.group_code 列")
         cols3 = [c3["name"] for c3 in inspector.get_columns("project_requests")]
         if "project_id" not in cols3:
             db.execute(text("ALTER TABLE project_requests ADD COLUMN project_id INTEGER"))
             db.commit()
             print("提示: 已添加 project_requests.project_id 列")
+        if "group_code" not in cols3:
+            db.execute(text("ALTER TABLE project_requests ADD COLUMN group_code VARCHAR(100) DEFAULT ''"))
+            db.commit()
+            print("提示: 已添加 project_requests.group_code 列")
+        cols4 = [c4["name"] for c4 in inspector.get_columns("performance_assessments")]
+        if "peer_review_open" not in cols4:
+            db.execute(text("ALTER TABLE performance_assessments ADD COLUMN peer_review_open BOOLEAN DEFAULT 0"))
+            db.commit()
+            print("提示: 已添加 peer_review_open 列")
 
 
     except Exception as e:
@@ -150,10 +163,10 @@ async def lifespan(app: FastAPI):
 
 
     try:
-        sync_result = crud.sync_all_projects_to_workload(db)
-        print(f"项目库同步完成: {sync_result}")
+        repair_result = crud.repair_legacy_data(db)
+        print(f"历史数据修复完成: {repair_result}")
     except Exception as e:
-        print(f"项目库同步失败: {e}")
+        print(f"历史数据修复失败: {e}")
 
     yield
 
@@ -318,7 +331,7 @@ def get_current_user_info(current_user: models.User = Depends(auth.get_current_u
 
     import sqlite3
 
-    conn = sqlite3.connect(r"E:\gs\pt\2\backend\building_institute.db")
+    conn = sqlite3.connect(_osp.join(_osp.dirname(_osp.abspath(__file__)), "building_institute.db"))
 
     conn.row_factory = sqlite3.Row
 
@@ -637,7 +650,7 @@ def list_project_requests(status: str = None, db: Session = Depends(get_db), cur
 
 @app.put("/api/project-requests/{request_id}/approve")
 
-def approve_project_request(request_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.require_role(["director"]))):
+def approve_project_request(request_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.require_role(["director", "deputy_director"]))):
 
     import traceback
 
@@ -665,7 +678,7 @@ def approve_project_request(request_id: int, db: Session = Depends(get_db), curr
 
 @app.put("/api/project-requests/{request_id}/reject")
 
-def reject_project_request(request_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.require_role(["director"]))):
+def reject_project_request(request_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.require_role(["director", "deputy_director"]))):
 
     req = crud.reject_project_request(db, request_id, current_user.id)
 
@@ -697,7 +710,7 @@ def delete_project(
 
     role = auth.get_user_role(current_user)
 
-    if role != "director" and proj.project_leader_id != current_user.id:
+    if role not in ["director", "deputy_director"] and proj.project_leader_id != current_user.id:
 
         raise HTTPException(status_code=403, detail="没有权限删除该项目")
 
@@ -881,7 +894,7 @@ def delete_project_stage(
 
     db: Session = Depends(get_db),
 
-    current_user: models.User = Depends(auth.require_role(["director"]))
+    current_user: models.User = Depends(auth.require_role(["director", "deputy_director"]))
 
 ):
 
@@ -901,7 +914,7 @@ def update_all_workload(
 
     db: Session = Depends(get_db),
 
-    current_user: models.User = Depends(auth.require_role(["director"]))
+    current_user: models.User = Depends(auth.require_role(["director", "deputy_director"]))
 
 ):
 
@@ -1387,6 +1400,10 @@ def delete_employee(
 
         raise HTTPException(status_code=404, detail="员工不存在")
 
+    if user.id == current_user.id:
+
+        raise HTTPException(status_code=400, detail="不能删除自己的账号")
+
     user.is_active = False
 
     db.commit()
@@ -1407,7 +1424,7 @@ def clear_all_employees(
 
     """清空所有导入的员工"""
 
-    deleted = db.query(models.User).filter(models.User.employee_id.isnot(None)).delete()
+    deleted = db.query(models.User).filter(models.User.employee_id.isnot(None), models.User.id != current_user.id).delete()
 
     db.commit()
 
@@ -1551,11 +1568,9 @@ def clear_workload(
 
 ):
 
-    count = db.query(models.WorkloadRecord).delete()
-
-    db.commit()
-
-    return {"deleted": count}
+    """清空整个项目库（项目和项目数据）"""
+    result = crud.clear_project_library(db)
+    return {"message": "项目库已清空", **result}
 
 
 
@@ -1894,7 +1909,7 @@ def export_workload(
             return project_by_name[r.project_name.strip()]
         return None
 
-    columns = ["项目编号", "项目类型", "规模", "阶段", "开始日期", "预计结束", "计划工天", "项目负责人", "设计", "复核", "专业负责人", "院审", "总体审核", "集团审核"]
+    columns = ["项目编号", "项目名称", "项目类型", "规模", "阶段", "开始日期", "预计结束", "计划工天", "项目负责人", "设计", "复核", "专业负责人", "院审", "总体审核", "集团审核"]
 
     import pandas as pd
 
@@ -1909,6 +1924,7 @@ def export_workload(
             scale = ("%g" % p.area) + "㎡"
         data.append({
             "项目编号": r.project_code or "",
+            "项目名称": (p.project_name if p and p.project_name else (r.project_name or "")),
             "项目类型": p.project_type if p and p.project_type else (r.project_type or ""),
             "规模": scale,
             "阶段": p.current_stage if p and p.current_stage else (r.stage or ""),
@@ -2280,6 +2296,22 @@ def list_performance_assessments(
 
 
 
+@app.get("/api/performance/workday-summary")
+
+def get_workday_summary(
+
+    assessment_id: int,
+
+    db: Session = Depends(get_db),
+
+    current_user: models.User = Depends(auth.require_role(["director", "deputy_director"]))
+
+):
+
+    return crud.get_personal_workday_summary(db, assessment_id)
+
+
+
 @app.delete("/api/performance/assessments/{assessment_id}")
 
 def delete_performance_assessment(
@@ -2301,6 +2333,40 @@ def delete_performance_assessment(
     return {"message": "删除成功"}
 
 
+
+@app.put("/api/performance/assessments/{assessment_id}/peer-review")
+
+def toggle_assessment_peer_review(
+
+    assessment_id: int,
+
+    body: dict,
+
+    db: Session = Depends(get_db),
+
+    current_user: models.User = Depends(auth.require_role(["director"]))
+
+):
+
+    assessment = crud.get_assessment(db, assessment_id)
+
+    if not assessment:
+
+        raise HTTPException(status_code=404, detail="考核不存在")
+
+    assessment.peer_review_open = bool(body.get("open", False))
+
+    db.commit()
+
+    db.refresh(assessment)
+
+    return {
+
+        "message": "已开放员工互评" if assessment.peer_review_open else "已关闭员工互评",
+
+        "peer_review_open": assessment.peer_review_open
+
+    }
 
 
 
@@ -2329,6 +2395,12 @@ def create_workday(
 @app.delete('/api/performance/workdays/{record_id}')
 
 def delete_workday(record_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    rec = db.query(models.WorkdayRecord).filter(models.WorkdayRecord.id == record_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail='记录不存在')
+    role = auth.get_user_role(current_user)
+    if role not in ["director", "deputy_director"] and rec.user_id != current_user.id and rec.submitted_by != current_user.id:
+        raise HTTPException(status_code=403, detail='没有权限删除该工天记录')
     ok = crud.delete_workday_record(db, record_id)
     if not ok:
         raise HTTPException(status_code=404, detail='记录不存在')
@@ -2336,7 +2408,7 @@ def delete_workday(record_id: int, db: Session = Depends(get_db), current_user: 
 
 @app.post("/api/performance/alloc-save-final")
 
-def save_alloc_final(body: dict, db: Session = Depends(get_db)):
+def save_alloc_final(body: dict, db: Session = Depends(get_db), current_user: models.User = Depends(auth.require_role(["director", "deputy_director", "project_leader"]))):
 
     import json
 
@@ -2347,6 +2419,18 @@ def save_alloc_final(body: dict, db: Session = Depends(get_db)):
     if not pid:
 
         return {"error": "missing project_id"}
+
+    proj = db.query(models.Project).filter(models.Project.id == pid).first()
+
+    if not proj:
+
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    role = auth.get_user_role(current_user)
+
+    if role not in ["director", "deputy_director"] and proj.project_leader_id != current_user.id:
+
+        raise HTTPException(status_code=403, detail="没有权限分配该项目工天")
 
     data = body.get("data", {}); dd = data if isinstance(data, dict) else {}; dd["locked"] = True; data_str = json.dumps(data, ensure_ascii=False)
 
@@ -2390,7 +2474,7 @@ def get_workday_list(data: dict, db = Depends(get_db), current_user = Depends(au
 
 @app.get("/api/performance/workday-alloc/{project_id}")
 
-def load_workday_alloc(project_id: int, db = Depends(get_db)):
+def load_workday_alloc(project_id: int, db = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
 
     import json
 
@@ -2419,6 +2503,31 @@ def submit_score(
     current_user: models.User = Depends(auth.get_current_user)
 
 ):
+
+    role = auth.get_user_role(current_user)
+    if data.evaluator_role == "peer":
+        assessment = crud.get_assessment(db, data.assessment_id)
+        if not assessment:
+            raise HTTPException(status_code=404, detail="考核不存在")
+        if not assessment.peer_review_open:
+            raise HTTPException(status_code=403, detail="员工互评未开放")
+        if data.target_user_id == current_user.id:
+            raise HTTPException(status_code=400, detail="不能给自己评分")
+    elif data.evaluator_role == "director":
+        if role != "director":
+            raise HTTPException(status_code=403, detail="仅所长可提交所长评分")
+    elif data.evaluator_role == "deputy_director":
+        if role != "deputy_director":
+            raise HTTPException(status_code=403, detail="仅副所长可提交副所长评分")
+    elif data.evaluator_role == "project_leader":
+        if role not in ["director", "deputy_director", "project_leader"]:
+            raise HTTPException(status_code=403, detail="仅项目负责人可提交项目评分")
+        if role == "project_leader":
+            proj = db.query(models.Project).filter(models.Project.project_name == data.project_name).first()
+            if not proj or proj.project_leader_id != current_user.id:
+                raise HTTPException(status_code=403, detail="仅可对自己负责的项目评分")
+    else:
+        raise HTTPException(status_code=400, detail="无效的评分角色")
 
     score = crud.create_performance_score(db, data.model_dump(), current_user.id)
 
@@ -2454,7 +2563,7 @@ def calculate_results(
 
     db: Session = Depends(get_db),
 
-    current_user: models.User = Depends(auth.require_role(["director"]))
+    current_user: models.User = Depends(auth.require_role(["director", "deputy_director"]))
 
 ):
 
@@ -2482,7 +2591,7 @@ def get_results(
 
 ):
 
-    return crud.calculate_assessment_results(db, assessment_id)
+    return crud.get_assessment_results(db, assessment_id)
 
 
 @app.get("/api/performance/leader-scores")
@@ -2796,37 +2905,26 @@ def approve_workday_req(req_id: int, data: dict, db=Depends(get_db),
 
     req.reviewed_at = datetime.utcnow()
 
-    # Find WorkdayRecord by user_id + project_name + assessment_id
+    # 同一考核期内一个项目只保留一条基本工天，最后保存覆盖前面的
 
     rec = db.query(models.WorkdayRecord).filter(
 
-        models.WorkdayRecord.user_id == req.user_id,
+        models.WorkdayRecord.assessment_id == req.assessment_id,
 
-        models.WorkdayRecord.project_name == req.project_name,
-
-        models.WorkdayRecord.assessment_id == req.assessment_id
+        models.WorkdayRecord.project_name == req.project_name
 
     ).first()
 
-    # If not found by assessment_id, try project_name + user_id only
-
-    if not rec:
-
-        rec = db.query(models.WorkdayRecord).filter(
-
-            models.WorkdayRecord.user_id == req.user_id,
-
-            models.WorkdayRecord.project_name == req.project_name
-
-        ).first()
-
     if rec:
+
+        rec.user_id = req.user_id
 
         rec.A = req.A; rec.B = req.B; rec.C = req.C
 
         rec.D = req.D; rec.E = req.E; rec.F = req.F
 
-        rec.G = req.A * req.B * req.C * req.D * req.E * req.F
+        _g = req.A * req.B * req.C * req.D * req.E * req.F
+        rec.G = int(_g + 0.5) if _g >= 0 else int(_g - 0.5)
 
     else:
 
@@ -2842,7 +2940,7 @@ def approve_workday_req(req_id: int, data: dict, db=Depends(get_db),
 
             A=req.A, B=req.B, C=req.C, D=req.D, E=req.E, F=req.F,
 
-            G=req.A * req.B * req.C * req.D * req.E * req.F,
+            G=int(req.A * req.B * req.C * req.D * req.E * req.F + 0.5),
 
             submitted_by=current_user.id
 
@@ -2935,6 +3033,18 @@ def handle_workday_alloc(project_id: int, body: dict, db: Session = Depends(get_
     import json
 
     from models import ProjectWorkdayAlloc
+
+    proj = db.query(models.Project).filter(models.Project.id == project_id).first()
+
+    if not proj:
+
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    role = auth.get_user_role(current_user)
+
+    if role not in ["director", "deputy_director"] and proj.project_leader_id != current_user.id:
+
+        raise HTTPException(status_code=403, detail="没有权限分配该项目工天")
 
     data_str = json.dumps(body.get("data", {}), ensure_ascii=False)
 

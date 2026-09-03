@@ -43,7 +43,15 @@
 
 
 
-      <input class="pm-search" v-model="searchQuery" placeholder="搜索项目名称..." />
+      <input class="pm-search" v-model="sq" placeholder="搜索项目名称/编号..." />
+      <select v-model="filterType" class="pm-search" style="max-width:150px;min-width:110px">
+        <option value="">全部类型</option>
+        <option v-for="t in filterTypeOptions" :key="t" :value="t">{{ t }}</option>
+      </select>
+      <select v-model="filterStage" class="pm-search" style="max-width:160px;min-width:120px">
+        <option value="">全部阶段</option>
+        <option v-for="s in filterStageOptions" :key="s" :value="s">{{ s }}</option>
+      </select>
 
 
 
@@ -148,7 +156,9 @@
 
 
 
-      <div class="form-row"><label>项目编号</label><input v-model="np.project_code" placeholder="集团或院计表编号" /></div>
+      <div class="form-row"><label>项目编号</label><input v-model="np.project_code" readonly title="按 类型拼音缩写-年-月-日 自动生成" /></div>
+
+      <div class="form-row"><label>集团编号</label><input v-model="np.group_code" /></div>
 
 
 
@@ -193,7 +203,7 @@
 
 
 
-        <select v-model="np.project_type">
+        <select v-model="np.project_type" @change="autoProjectCode">
 
 
 
@@ -567,7 +577,7 @@
 
 
 
-      <div class="form-row"><label>开始日期</label><div class="date-field"><input v-model="np.start_date" type="date" :class="{ 'has-value': !!np.start_date }" /><span v-if="!np.start_date" class="date-field-ph">开始日期</span></div></div>
+      <div class="form-row"><label>开始日期</label><div class="date-field"><input v-model="np.start_date" type="date" :class="{ 'has-value': !!np.start_date }" /><span v-if="!np.start_date" class="date-field-ph">请选择日期</span></div></div>
 
 
 
@@ -582,7 +592,7 @@
 
 
 
-      <div class="form-row"><label>预计结束日期</label><div class="date-field"><input v-model="np.planned_end_date" type="date" :class="{ 'has-value': !!np.planned_end_date }" /><span v-if="!np.planned_end_date" class="date-field-ph">预计结束日期</span></div></div>
+      <div class="form-row"><label>预计结束日期</label><div class="date-field"><input v-model="np.planned_end_date" type="date" :class="{ 'has-value': !!np.planned_end_date }" /><span v-if="!np.planned_end_date" class="date-field-ph">请选择日期</span></div></div>
 
 
 
@@ -915,6 +925,16 @@
 
 
 
+<div><span class="dl">集团编号</span><span class="dv">{{ p.group_code || "-" }}</span></div>
+
+
+
+
+
+
+
+
+
 <div><span class="dl">项目类型</span><span class="dv">{{ p.project_type || "-" }}</span></div>
 
 
@@ -969,6 +989,20 @@
 
 
 <div><span class="dl">暂估工天</span><span class="dv">{{ p.planned_man_days || 0 }}</span></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div><span class="dl">基本工天</span><span class="dv">{{ p.basic_work_days !== null && p.basic_work_days !== undefined ? p.basic_work_days : "-" }}</span></div>
 
 
 
@@ -2623,6 +2657,10 @@ const auth = useAuthStore()
 
 const sq = ref("")
 
+const filterType = ref("")
+
+const filterStage = ref("")
+
 
 
 
@@ -2790,7 +2828,29 @@ const mnote = ref({})
 
 
 
-const np = ref({ project_code: "", project_name: "", project_type: "民建", area: 0, status: "planning", start_date: "", planned_end_date: "", planned_man_days: 0, current_stage: "方案设计", description: "", work_rounds: 1, round_reason: "", drawing_list: [] })
+const np = ref({ project_code: "", group_code: "", project_name: "", project_type: "民建", area: 0, status: "planning", start_date: "", planned_end_date: "", planned_man_days: 0, current_stage: "方案设计", description: "", work_rounds: 1, round_reason: "", drawing_list: [] })
+
+function pad2(v) {
+  return String(v).padStart(2, "0")
+}
+
+function typeCodePrefix(projectType) {
+  const map = {
+    "站房": "ZF", "枢纽": "SN", "大铁": "DT", "轨交": "GJ", "民建": "MJ",
+    "改造": "GZ", "援外": "YW", "BIM": "BI", "方案": "FA", "建模": "JM",
+    "咨询": "ZX", "总包": "ZB"
+  }
+  return map[projectType] || String(projectType || "").slice(0, 2).toUpperCase()
+}
+
+function autoProjectCode() {
+  const now = new Date()
+  const base = typeCodePrefix(np.value.project_type) + "-" + now.getFullYear() + "-" + pad2(now.getMonth() + 1) + "-" + pad2(now.getDate())
+  const count = projects.value.filter(function(p) {
+    return p.project_code === base || p.project_code.indexOf(base + "-") === 0
+  }).length
+  np.value.project_code = count ? base + "-" + pad2(count + 1) : base
+}
 
 
 
@@ -2918,7 +2978,7 @@ async function saveProjectDrawingList(p) {
   }
 }
 
-function resetNp() { np.value = { project_code: "", project_name: "", project_type: "民建", area: 0, status: "planning", start_date: "", planned_end_date: "", planned_man_days: 0, current_stage: "方案设计", description: "", work_rounds: 1, round_reason: "", drawing_list: [] } }
+function resetNp() { np.value = { project_code: "", group_code: "", project_name: "", project_type: "民建", area: 0, status: "planning", start_date: "", planned_end_date: "", planned_man_days: 0, current_stage: "方案设计", description: "", work_rounds: 1, round_reason: "", drawing_list: [] }; autoProjectCode() }
 
 
 
@@ -3081,6 +3141,10 @@ const isDirector = computed(() => auth.isDirector)
 
 
 
+const filterTypeOptions = computed(() => [...new Set(projects.value.map(p => p.project_type).filter(Boolean))])
+
+const filterStageOptions = computed(() => [...new Set(projects.value.map(p => p.current_stage).filter(Boolean))])
+
 const filtered = computed(() => {
 
 
@@ -3111,6 +3175,34 @@ const filtered = computed(() => {
 
 
 
+
+
+
+
+
+
+
+  if (filterType.value) {
+    list = list.filter(p => p.project_type === filterType.value)
+  }
+
+  if (filterStage.value) {
+    list = list.filter(p => p.current_stage === filterStage.value)
+  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   if (sq.value) {
 
 
@@ -3126,7 +3218,7 @@ const filtered = computed(() => {
 
 
 
-    list = list.filter(p => p.project_name.toLowerCase().includes(sq.value.toLowerCase()))
+    list = list.filter(p => (p.project_name || "").toLowerCase().includes(sq.value.toLowerCase()) || (p.project_code || "").toLowerCase().includes(sq.value.toLowerCase()))
 
 
 
@@ -4154,7 +4246,7 @@ async function handleCreateProject() {
 
 
 
-  const body = { project_code: np.value.project_code, project_name: np.value.project_name, project_type: np.value.project_type, area: np.value.area || 0, stage: np.value.current_stage || "方案设计", start_date: np.value.start_date, planned_end_date: np.value.planned_end_date, planned_man_days: np.value.planned_man_days || 0, description: np.value.description || "", work_rounds: np.value.work_rounds || 1, round_reason: np.value.round_reason || "", drawing_list: np.value.drawing_list || [] }
+  const body = { project_code: np.value.project_code, group_code: np.value.group_code || "", project_name: np.value.project_name, project_type: np.value.project_type, area: np.value.area || 0, stage: np.value.current_stage || "方案设计", start_date: np.value.start_date, planned_end_date: np.value.planned_end_date, planned_man_days: np.value.planned_man_days || 0, description: np.value.description || "", work_rounds: np.value.work_rounds || 1, round_reason: np.value.round_reason || "", drawing_list: np.value.drawing_list || [] }
 
 
 
@@ -6777,7 +6869,7 @@ function findProjectIdByMember(m) {
 
 
 
-onMounted(() => { loadProjects(); loadPool() })
+onMounted(async () => { await loadProjects(); loadPool(); autoProjectCode() })
 
 
 
@@ -7141,9 +7233,22 @@ onMounted(() => { loadProjects(); loadPool() })
 
 .date-field { position: relative; flex: 1; min-width: 140px; }
 .date-field input { width: 100%; min-width: 0; }
-.date-field input::-webkit-datetime-edit { color: transparent; }
-.date-field input.has-value::-webkit-datetime-edit { color: #1e293b; }
+.date-field input::-webkit-datetime-edit,
+.date-field input::-webkit-datetime-edit-fields-wrapper,
+.date-field input::-webkit-datetime-edit-year-field,
+.date-field input::-webkit-datetime-edit-month-field,
+.date-field input::-webkit-datetime-edit-day-field {
+  color: transparent;
+}
+.date-field input.has-value::-webkit-datetime-edit,
+.date-field input.has-value::-webkit-datetime-edit-fields-wrapper,
+.date-field input.has-value::-webkit-datetime-edit-year-field,
+.date-field input.has-value::-webkit-datetime-edit-month-field,
+.date-field input.has-value::-webkit-datetime-edit-day-field {
+  color: #1e293b;
+}
 .date-field-ph { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #94a3b8; pointer-events: none; white-space: nowrap; }
+.date-field:focus-within .date-field-ph { display: none; }
 
 
 

@@ -97,13 +97,31 @@
         <div v-else class="pa-empty">暂无项目信息</div>
       </div>
 
-      <div v-if="activeTab==='score'" class="pa-panel">
-        <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:2px solid #e2e8f0">
-          <button class="pa-tab" :class="{active:scoreSubTab==='project'}" @click="switchScoreSubTab('project')">项目评分</button>
-          <button v-if="canViewEvalScoring" class="pa-tab" :class="{active:scoreSubTab==='eval'}" @click="switchScoreSubTab('eval')">考核</button>
+      <div v-if="activeTab==='workdays'" class="pa-panel">
+        <div class="pa-panel-head">个人总工天</div>
+        <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select v-model="summaryAssessmentId" class="input" style="width:auto">
+            <option value="">-- 选择考核期 --</option>
+            <option v-for="a in assessments" :key="a.id" :value="a.id">{{ a.year }} - {{ a.name || a.year }}</option>
+          </select>
+          <button class="btn btn-primary btn-sm" @click="loadWorkdaySummary" :disabled="!summaryAssessmentId">加载</button>
         </div>
-        <div v-if="scoreSubTab==='project'">
-        <div class="pa-panel-head">项目评分</div>
+        <div v-if="workdaySummary.length" class="pa-scroll">
+          <table class="pa-table">
+            <thead><tr><th>排名</th><th>工号</th><th>姓名</th><th>专业</th><th>部门</th><th>总工天</th></tr></thead>
+            <tbody>
+              <tr v-for="(r, idx) in workdaySummary" :key="r.user_id">
+                <td>{{ idx + 1 }}</td><td>{{ r.employee_id }}</td><td>{{ r.name }}</td><td>{{ r.profession || "-" }}</td><td>{{ r.department || "-" }}</td>
+                <td><strong>{{ Number(r.total_workdays || 0).toFixed(0) }}</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="pa-empty">选择考核期后点击“加载”</div>
+      </div>
+
+      <div v-if="activeTab==='score'" class="pa-panel">
+        <div class="pa-panel-head">项目评分和工天分配</div>
         <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select v-model="scoreProjectId" class="input" style="width:auto" @change="changeScoreProject">
             <option value="">选择项目</option>
@@ -113,19 +131,22 @@
         </div>
         <div v-if="scoreProjectMembers.length" class="pa-scroll">
           <table class="pa-table">
-            <thead><tr><th>工号</th><th>姓名</th><th>角色</th><th>评分</th><th>操作</th></tr></thead>
+            <thead><tr><th>工号</th><th>姓名</th><th>角色</th><th>评分</th></tr></thead>
             <tbody>
               <tr v-for="m in scoreProjectMembers" :key="m.id">
                 <td>{{ m.employee_id }}</td><td>{{ m.employee_name }}</td><td>{{ m.displayRole || m.role }}</td>
                 <td><input v-model.number="m.score" type="number" min="0" max="100" class="input score-input" @input="clampProjectScore(m)" /></td>
-                <td><button class="btn btn-primary btn-sm" @click="saveProjectScore(m)">保存</button></td>
               </tr>
             </tbody>
           </table>
+          <div style="margin:10px 0;display:flex;justify-content:flex-end">
+            <button class="btn btn-primary btn-sm" @click="saveProjectScores" :disabled="loading || !scoreProjectMembers.some(m => m.score !== null && m.score !== undefined)">保存全部</button>
+          </div>
         </div>
         <div v-else class="pa-empty">选择项目后加载人员</div>
-        </div>
-        <div v-if="canViewEvalScoring && scoreSubTab==='eval'">
+      </div>
+
+      <div v-if="activeTab==='eval'" class="pa-panel">
         <div class="pa-panel-head">考核</div>
         <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select v-model="evalAssessmentId" class="input" style="width:auto">
@@ -133,6 +154,9 @@
             <option v-for="a in assessments" :key="a.id" :value="a.id">{{ a.year }} - {{ a.name || a.year }}</option>
           </select>
           <div class="role-display" v-if="evalRole">评分角色：<strong>{{ roleLabel() }}</strong></div>
+          <button v-if="canOpenPeerReview" class="btn btn-sm" :class="selectedEvalAssessment?.peer_review_open ? 'btn-success' : 'btn-outline'" @click="togglePeerReview">
+            {{ selectedEvalAssessment?.peer_review_open ? '已开放员工互评' : '开放员工互评' }}
+          </button>
           <select v-if="evalRole==='project_leader'" v-model="evalProject" class="input" style="width:auto">
             <option value="">选择项目</option>
             <option v-for="p in myProjects" :key="p.project_name" :value="p.project_name">{{ p.project_name }}</option>
@@ -141,7 +165,7 @@
         </div>
 <div v-if="scoreTargets.length" class="pa-scroll">
         <table class="pa-table">
-          <thead><tr><th>姓名</th><th>所长</th><th>副所长</th><th>项目维度综合评分</th><th>互评</th><th>操作</th></tr></thead>
+          <thead><tr><th>姓名</th><th>所长</th><th>副所长</th><th>项目维度综合评分</th><th>互评</th></tr></thead>
           <tbody>
             <tr v-for="t in scoreTargets" :key="t.id">
               <td>{{ t.name }}</td>
@@ -161,13 +185,38 @@
                 <input v-if="evalRole==='peer'" v-model.number="t.score" type="number" min="0" max="100" class="input score-input" style="width:60px;font-size:11px;padding:3px" placeholder="0-100" @input="clampEvalScore(t)" />
                 <span v-else>{{ t.peerScore !== null && t.peerScore !== undefined ? t.peerScore.toFixed(1) : "-" }}</span>
               </td>
-              <td><button class="btn btn-primary btn-sm" @click="submitEvalScore(t)" :disabled="loading || t.score === null || t.score === undefined">提交</button></td>
             </tr>
           </tbody>
         </table>
-      </div>
-        <div v-else class="pa-empty">点击"加载待评人员"加载待评人员列表</div>
+        <div style="margin:10px 0;display:flex;justify-content:flex-end">
+          <button class="btn btn-primary btn-sm" @click="submitEvalScores" :disabled="loading || !scoreTargets.some(t => t.score !== null && t.score !== undefined)">保存全部</button>
         </div>
+      </div>
+      <div v-else class="pa-empty">点击"加载待评人员"加载待评人员列表</div>
+      </div>
+
+      <div v-if="activeTab==='peer'" class="pa-panel">
+        <div class="pa-panel-head">员工互评</div>
+        <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select v-model="evalAssessmentId" class="input" style="width:auto" @change="loadScoreTargets">
+            <option value="">-- 选择考核期 --</option>
+            <option v-for="a in openPeerAssessments" :key="a.id" :value="a.id">{{ a.year }} - {{ a.name || a.year }}</option>
+          </select>
+          <button class="btn btn-primary btn-sm" @click="loadScoreTargets" :disabled="!evalAssessmentId">加载待评人员</button>
+        </div>
+        <div v-if="scoreTargets.length" class="pa-scroll">
+          <table class="pa-table">
+            <thead><tr><th>姓名</th><th>互评</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="t in scoreTargets" :key="t.id">
+                <td>{{ t.name }}</td>
+                <td><input v-model.number="t.score" type="number" min="0" max="100" class="input score-input" style="width:60px;font-size:11px;padding:3px" placeholder="0-100" @input="clampEvalScore(t)" /></td>
+                <td><button class="btn btn-primary btn-sm" @click="submitEvalScore(t)" :disabled="loading || t.score === null || t.score === undefined">提交</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="pa-empty">点击"加载待评人员"加载待评人员列表</div>
       </div>
 
       <div v-if="activeTab==='result'" class="pa-panel">
@@ -178,6 +227,7 @@
             <option v-for="a in assessments" :key="a.id" :value="a.id">{{ a.year }} - {{ a.name || a.year }}</option>
           </select>
           <button class="btn btn-outline btn-sm" @click="loadResults" :disabled="!resultAssessmentId">加载</button>
+          <button class="btn btn-primary btn-sm" @click="calculateResults" :disabled="!resultAssessmentId || loading">计算考核结果</button>
           
         </div>
         <div v-if="results.length" class="pa-scroll" style="max-height:500px">
@@ -186,7 +236,7 @@
             <tbody>
               <tr v-for="(r, idx) in results" :key="r.id">
                 <td>{{ idx + 1 }}</td><td>{{ r.user_name }}</td><td>{{ r.profession || "-" }}</td>
-                <td>{{ r.total_workdays }}</td>
+                <td>{{ Number(r.total_workdays || 0).toFixed(0) }}</td>
                 <td>{{ r.director_score.toFixed(1) }}</td><td>{{ r.deputy_score.toFixed(1) }}</td>
                 <td>{{ r.leader_score.toFixed(1) }}</td><td>{{ r.peer_score.toFixed(1) }}</td>
                 <td><strong>{{ r.final_score.toFixed(1) }}</strong></td>
@@ -221,7 +271,11 @@
     <div style="margin-bottom:8px">
       <label style="font-size:13px">项目负责人提取比例 (5%~8%)</label>
       <input v-model.number="allocData.leaderPct" type="number" step="1" min="5" max="8" class="input" style="width:70px" :disabled="isAllocLocked" />
-      = <strong>{{ ((currentAllocProject?.G || 0) * ((allocData.leaderPct || 5) / 100)).toFixed(2) }}</strong>
+      = <strong>{{ Math.round((currentAllocProject?.G || 0) * ((allocData.leaderPct || 5) / 100)) }} 天</strong>
+    </div>
+    <div style="margin-bottom:8px;font-size:13px;display:flex;gap:18px;flex-wrap:wrap">
+      <span>项目工天总数：<strong>{{ totalG }}</strong></span>
+      <span>可分配工天总数：<strong style="color:#1a73e8">{{ allocatableTotal }}</strong></span>
     </div>
     <div style="margin-bottom:12px;border:1px solid #e2e8f0;border-radius:6px;padding:10px">
       <div style="font-size:13px;font-weight:500;margin-bottom:8px">角色分配比例</div>
@@ -327,6 +381,8 @@ const activeTab = ref("myproj")
 const myProjects = ref([])
 const assessments = ref([])
 const currentAssessmentId = ref("")
+const summaryAssessmentId = ref("")
+const workdaySummary = ref([])
 const loading = ref(false)
 
 const tabs = computed(() => {
@@ -334,14 +390,21 @@ const tabs = computed(() => {
     { key: "myproj", label: "我的项目" },
     { key: "scoring", label: "项目工天" },
   ]
-  if (canViewScoreTab.value) items.push({ key: "score", label: "评分" })
+  if (authStore.isDirector || authStore.isDeputyDirector) items.push({ key: "workdays", label: "个人总工天" })
+  if (canViewScoreTab.value) items.push({ key: "score", label: "项目评分和工天分配" })
+  if (authStore.isDirector || authStore.isDeputyDirector) items.push({ key: "eval", label: "考核" })
   if (authStore.isDirector || authStore.isDeputyDirector) items.push({ key: "result", label: "考核结果" })
+  if (hasOpenPeerReview.value) items.push({ key: "peer", label: "员工互评" })
   return items
 })
 
 const evalAssessmentId = ref("")
 const evalRole = ref("")
 const evalProject = ref("")
+const openPeerAssessments = computed(() => assessments.value.filter(a => a.peer_review_open))
+const hasOpenPeerReview = computed(() => openPeerAssessments.value.length > 0)
+const selectedEvalAssessment = computed(() => assessments.value.find(a => Number(a.id) === Number(evalAssessmentId.value)))
+const canOpenPeerReview = computed(() => (authStore.isDirector || authStore.isDeputyDirector) && !!selectedEvalAssessment.value)
 
 // Auto-detect scoring role from user role
 function roleLabel() {
@@ -393,10 +456,37 @@ function switchTab(key) {
       loadScores()
     }
   }
+  if (key === "workdays") {
+    if (!summaryAssessmentId.value && assessments.value.length) {
+      summaryAssessmentId.value = assessments.value[0].id
+    }
+    loadWorkdaySummary()
+  }
 if (key === "score") {
   if (!canViewScoreTab.value) return
-  loadScoreProjects()
+  if (!currentAssessmentId.value && assessments.value.length) {
+    currentAssessmentId.value = assessments.value[0].id
+  }
+  loadScoreProjects().then(function() {
+    if (scoreProjectId.value) openScoreAlloc()
+  })
 }
+  if (key === "eval") {
+    if (!canViewEvalScoring.value) return
+    if (assessments.value.length && !evalAssessmentId.value) {
+      evalAssessmentId.value = assessments.value[0].id
+    }
+    loadScoreTargets()
+  }
+  if (key === "peer") {
+    const openList = openPeerAssessments.value
+    if (!openList.length) return
+    if (!openList.some(a => Number(a.id) === Number(evalAssessmentId.value))) {
+      evalAssessmentId.value = openList[0].id
+    }
+    updateEvalRole()
+    loadScoreTargets()
+  }
   if (key === "result") {
     if (!authStore.isDirector && !authStore.isDeputyDirector) return
     if (assessments.value.length) {
@@ -430,21 +520,50 @@ async function createAssessment() {
   loading.value = false
 }
 
+async function togglePeerReview() {
+  const a = selectedEvalAssessment.value
+  if (!a) return
+  loading.value = true
+  try {
+    await performanceAPI.setPeerReview(a.id, !a.peer_review_open)
+    await loadAssessments()
+    if (evalAssessmentId.value) {
+      const stillOpen = openPeerAssessments.value.some(x => Number(x.id) === Number(evalAssessmentId.value))
+      if (!stillOpen && !authStore.isDirector && !authStore.isDeputyDirector) {
+        evalAssessmentId.value = openPeerAssessments.value[0]?.id || ""
+      }
+    }
+  } catch(e) { console.error(e); alert("操作失败") }
+  loading.value = false
+}
+
 async function loadScores() {
   if (!currentAssessmentId.value) return
   try {
     const r = await performanceAPI.getWorkdays(currentAssessmentId.value)
     const saved = {}
-    r.data.forEach(s => { saved[s.project_name] = s })
+    r.data.forEach(s => { saved[s.project_name || ""] = s })
     myProjects.value.forEach(p => {
-      const s = saved[p.project_name]
+      const s = saved[p.project_name || ""]
       if (s) {
         p.A = Number(s.A)
         p.B = s.B !== undefined && s.B !== null && s.B !== "" ? Number(s.B) : calcStageRatio(p.stage, p.project_type)
         p.stageRatioCustom = !isPresetStageRatio(p, p.B)
         p.C = Number(s.C); p.D = Number(s.D); p.E = Number(s.E); p.F = Number(s.F); p.G = Math.round(Number(s.G)); p.savedId = s.id
       }
-      else { p.A = Number(p.A || 1); p.B = calcStageRatio(p.stage, p.project_type); p.stageRatioCustom = false; p.C = Number(p.C || 1); p.D = Number(p.D || 1); p.E = Number(p.E || 1); p.F = Number(p.F || 1); p.savedId = undefined; calcG(p) }
+      else {
+        var defA = Number(p.planned_man_days || 0)
+        if (!defA && Number(p.calculated_work_days || 0) > 0) defA = Number(p.calculated_work_days)
+        p.A = defA
+        p.B = calcStageRatio(p.stage, p.project_type)
+        p.stageRatioCustom = false
+        p.C = 1
+        p.D = 1
+        p.E = 1
+        p.F = 1
+        p.savedId = undefined
+        calcG(p)
+      }
     })
     // Load workday requests to check pending status
     const reqs = (await api.get("/performance/workday-requests")).data
@@ -668,18 +787,20 @@ async function saveProjectScore2() {
   } catch(e) { alert("保存失败") }
 }
 
-function changeScoreProject() {
+async function changeScoreProject() {
   showProjectScoreDialog.value = false
   showAllocDialog.value = false
   scoreProjectMembers.value = []
-  loadProjectScoreMembers()
+  await loadProjectScoreMembers()
+  if (scoreProjectId.value) openScoreAlloc()
 }
 
 async function loadProjectScoreMembers() {
   if (!scoreProjectId.value) return
   try {
     const r = await api.get("/projects/" + scoreProjectId.value + "/members")
-    scoreProjectMembers.value = r.data.filter(m => m.role !== "项目负责人").map(m => ({
+    const scoreRoles = ["专业负责人", "专业审核", "设计", "设计阶段", "复核", "复核阶段"]
+    scoreProjectMembers.value = r.data.filter(m => scoreRoles.includes(m.role)).map(m => ({
       ...m,
       score: null,
       displayRole: m.role === "专业审核" ? "专业负责人" : m.role
@@ -710,15 +831,33 @@ async function openScoreAlloc() {
   if (!p) return
   var stage = p.current_stage || "方案设计"
   var b = calcStageRatio(stage, p.project_type)
-  var base = p.planned_man_days || 0
+  var A = p.planned_man_days || 0
+  var C = 1
+  var D = 1
+  var E = 1
+  var F = 1
   try {
     if (currentAssessmentId.value) {
       const wd = await performanceAPI.getWorkdays(currentAssessmentId.value)
-      const rec = (wd.data || []).find(function(x) { return x.project_name === p.project_name })
-      if (rec && rec.A !== undefined && rec.A !== null) base = Number(rec.A) || 0
+      const recs = (wd.data || []).filter(function(x) { return x.project_name === p.project_name })
+      const rec = recs.reduce(function(best, x) { return !best || x.id > best.id ? x : best }, null)
+      if (rec && rec.A !== undefined && rec.A !== null) {
+        A = Number(rec.A) || 0
+        if (rec.B !== undefined && rec.B !== null && rec.B !== "") b = Number(rec.B)
+        C = Number(rec.C) || 1
+        D = Number(rec.D) || 1
+        E = Number(rec.E) || 1
+        F = Number(rec.F) || 1
+      }
     }
   } catch(e) {}
-  p.G = Math.round((base || 0) * b)
+  p.A = A
+  p.B = b
+  p.C = C
+  p.D = D
+  p.E = E
+  p.F = F
+  p.G = Math.round((A || 0) * b * C * D * E * F)
   openAllocDialog(p)
 }
 
@@ -747,6 +886,40 @@ async function saveProjectScore(m) {
   } catch(e) { alert("保存失败") }
 }
 
+async function saveProjectScores() {
+  if (!scoreProjectId.value) return
+  const rows = scoreProjectMembers.value.filter(m => m.score !== null && m.score !== undefined)
+  if (!rows.length) {
+    alert("请先填写评分")
+    return
+  }
+  if (!rows.every(m => isScoreValid(m.score))) {
+    alert("评分必须在0-100之间")
+    return
+  }
+  loading.value = true
+  try {
+    await Promise.all(rows.map(m => api.post("/projects/" + scoreProjectId.value + "/member-scores", {
+      target_employee_id: m.employee_id,
+      role: m.role,
+      score: m.score
+    })))
+    rows.forEach(m => {
+      const key = (m.employee_id || "") + "|" + (m.role || "")
+      scoreMap.value[key] = {
+        target_employee_id: m.employee_id,
+        role: m.role,
+        score: m.score,
+        comment: m.comment || ""
+      }
+    })
+    showProjectScoreDialog.value = false
+    showAllocDialog.value = false
+    alert("评分已保存")
+  } catch(e) { alert("保存失败") }
+  loading.value = false
+}
+
 async function loadScoreTargets() {
   if (!authStore.user) {
     try { authStore.user = (await api.get("/user/me")).data } catch(e) {}
@@ -756,7 +929,11 @@ async function loadScoreTargets() {
   try {
     const r = await api.get("/users")
     const allUsers = r.data
-    scoreTargets.value = allUsers.filter(u => u.is_active).map(u => ({
+    let candidates = allUsers.filter(u => u.is_active)
+    if (evalRole.value === "peer" && authStore.user) {
+      candidates = candidates.filter(u => u.id !== authStore.user.id)
+    }
+    scoreTargets.value = candidates.map(u => ({
       id: u.id, name: u.name, department: u.department, profession: u.profession || "",
       score: null, comment: "",
       directorScore: null, deputyScore: null, leaderScore: null, peerScore: null
@@ -769,6 +946,15 @@ async function loadScoreTargets() {
       else if (s.evaluator_role === "deputy_director") t.deputyScore = s.score
       else if (s.evaluator_role === "project_leader") t.leaderScore = s.score
       else if (s.evaluator_role === "peer") t.peerScore = s.score
+    })
+    const roleField = {
+      director: "directorScore",
+      deputy_director: "deputyScore",
+      project_leader: "leaderScore",
+      peer: "peerScore"
+    }[evalRole.value]
+    scoreTargets.value.forEach(t => {
+      if (roleField && t[roleField] !== null && t[roleField] !== undefined) t.score = t[roleField]
     })
     // Load calculated project leader scores from ProjectMemberScore data
     const ls = await api.get("/performance/leader-scores")
@@ -807,6 +993,38 @@ async function submitEvalScore(t) {
   loading.value = false
 }
 
+async function submitEvalScores() {
+  if (!evalAssessmentId.value || !evalRole.value) return
+  const rows = scoreTargets.value.filter(t => t.score !== null && t.score !== undefined)
+  if (!rows.length) {
+    alert("请先填写评分")
+    return
+  }
+  if (!rows.every(t => isScoreValid(t.score))) {
+    alert("评分必须在0-100之间")
+    return
+  }
+  loading.value = true
+  try {
+    await Promise.all(rows.map(t => performanceAPI.submitScore({
+      assessment_id: parseInt(evalAssessmentId.value),
+      target_user_id: t.id, score: t.score,
+      evaluator_role: evalRole.value,
+      project_name: evalRole.value === "project_leader" ? evalProject.value : null,
+      comment: t.comment || ""
+    })))
+    rows.forEach(t => {
+      if (evalRole.value === "director") t.directorScore = t.score
+      else if (evalRole.value === "deputy_director") t.deputyScore = t.score
+      else if (evalRole.value === "project_leader") t.leaderScore = t.score
+      else if (evalRole.value === "peer") t.peerScore = t.score
+    })
+    await loadScoreTargets()
+    alert("评分已全部保存")
+  } catch(e) { console.error(e); alert("保存失败") }
+  loading.value = false
+}
+
 function calcAvgScore(t) {
   var vals = [t.tech_quality, t.work_attitude, t.emergency_task, t.extra_contribution].filter(function(v) { return v !== null && v !== undefined })
   if (vals.length === 0) return t.score || 0
@@ -822,9 +1040,17 @@ function hasAnyScore(t) {
 async function loadResults() {
   if (!resultAssessmentId.value) return
   try {
+    await performanceAPI.calculateResults(resultAssessmentId.value)
     const r = await performanceAPI.getResults(resultAssessmentId.value)
     results.value = r.data.sort((a, b) => b.final_score - a.final_score)
   } catch(e) { console.error(e) }
+}
+
+async function loadWorkdaySummary() {
+  if (!summaryAssessmentId.value) return
+  try {
+    workdaySummary.value = (await performanceAPI.getWorkdaySummary(summaryAssessmentId.value)).data || []
+  } catch(e) { console.error(e); alert("加载失败") }
 }
 
 async function calculateResults() {
@@ -912,13 +1138,24 @@ function updateMemberDays(m) {
 }
 
 function calcDaysFromPct() {
-  var roles = {"\u4e13\u4e1a\u8d1f\u8d23\u4eba": "leader", "\u8bbe\u8ba1\u4eba": "designer", "\u590d\u6838\u4eba": "reviewer"}
-  for (var key in roles) {
-    var ms = allocDataRoleMembers(key)
-    for (var i = 0; i < ms.length; i++) {
-      updateMemberDays(ms[i], allocData.value.lv1[roles[key]] || 0)
-    }
+  var pool = Math.round(remainingG.value || 0)
+  var active = allocData.value.members.filter(function(m) { return (m.pct || 0) > 0 })
+  var pcts = active.map(function(m) { return m.pct || 0 })
+  var totalPct = pcts.reduce(function(a, b) { return a + b }, 0)
+  if (pool <= 0 || totalPct <= 0) {
+    allocData.value.members.forEach(function(m) { m.days = 0 })
+    return
   }
+  var exact = active.map(function(m) { return pool * (m.pct || 0) / totalPct })
+  var days = exact.map(function(x) { return Math.floor(x) })
+  var remaining = pool - days.reduce(function(a, b) { return a + b }, 0)
+  var order = exact.map(function(x, i) { return { i: i, frac: x - Math.floor(x) } })
+  order.sort(function(a, b) { return (b.frac - a.frac) || (a.i - b.i) })
+  for (var k = 0; k < remaining && k < order.length; k++) days[order[k].i]++
+  active.forEach(function(m, i) { m.days = days[i] })
+  allocData.value.members.forEach(function(m) {
+    if ((m.pct || 0) <= 0) m.days = 0
+  })
 }
 
 function memberErr(m) {
@@ -952,6 +1189,8 @@ function syncLv2() {
 
 const remainingG = computed(() => { var g = currentAllocProject.value?.G || 0; var lp = (allocData.value.leaderPct || 5) / 100; return g - g * lp })
 
+const allocatableTotal = computed(() => Math.round(remainingG.value || 0))
+
 const currentStagePct = computed(() => allocStageRatio(currentAllocProject.value?.stage))
 
 const stageData = computed(() => [
@@ -979,7 +1218,7 @@ async function openAllocDialog(p) {
     var matched = allProjs.find(function(pr) { return pr.project_name === p.project_name })
     if (matched) {
       var mr = await api.get("/projects/" + matched.id + "/members")
-      var roleMap = { "设计": "设计人", "复核": "复核人", "专业审核": "专业负责人" }
+      var roleMap = { "设计": "设计人", "复核": "复核人", "专业审核": "专业负责人", "专业负责人": "专业负责人" }
       allocData.value.members = mr.data.filter(function(m) {
         return roleMap[m.role]
       }).map(function(m) {

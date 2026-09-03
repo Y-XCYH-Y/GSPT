@@ -64,11 +64,6 @@ def generate_template():
 
 def import_from_excel(file_content: bytes, db: Session):
     """从 Excel 导入员工数据"""
-    # 清空旧数据，重新导入以保证数据一致性
-    # 保留管理员账号不删除
-    # 排除管理员账号不删除
-    db.query(models.User).filter(models.User.username != "admin").delete(synchronize_session=False)
-    db.commit()
     # 确保导入后管理员账号仍存在
     admin_exists = db.query(models.User).filter(models.User.username == "admin").first()
     if not admin_exists:
@@ -85,54 +80,78 @@ def import_from_excel(file_content: bytes, db: Session):
         db.commit()
     # 读取第一个 sheet（兼容不同命名）
     df = pd.read_excel(BytesIO(file_content), sheet_name=0)
-    
+
     results = {"created": 0, "updated": 0, "failed": 0, "errors": []}
     used_usernames = set()
-    
+
+    def safe_str(value, default=""):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return default
+        return str(value).strip()
+
+    existing_by_eid = {}
+    existing_by_name = {}
+    for u in db.query(models.User).filter(models.User.username != "admin").all():
+        if u.employee_id:
+            existing_by_eid[str(u.employee_id).strip()] = u
+        if u.name:
+            existing_by_name.setdefault(str(u.name).strip(), []).append(u)
+
     for index, row in df.iterrows():
         try:
             name = str(row.get("姓名", "")).strip()
             if not name or name == "nan":
                 continue
-            
-            # 生成用户名
-            username = generate_username(name, db, used_usernames)
-            
-            # 安全获取字段值
-            def safe_str(value, default=""):
-                if value is None or (isinstance(value, float) and pd.isna(value)):
-                    return default
-                return str(value).strip()
-            
+
             employee_id = safe_str(row.get("人员编号", ""))
-            user = models.User(
-                username=username,
-                password_hash=get_password_hash("123456"),
-                name=name,
-                employee_id=employee_id,
-                gender=safe_str(row.get("性别", "")),
-                profession=safe_str(row.get("专业方向", "")),
-                registration=safe_str(row.get("注册情况", "")),
-                title=safe_str(row.get("职称情况", "")),
-                birth_date=safe_str(row.get("出生年月", "")),
-                work_start_date=safe_str(row.get("参加工作时间", "")),
-                project_types=parse_project_types(safe_str(row.get("擅长项目类型", ""))),
-                experience=safe_str(row.get("历史项目经验", "")),
-                is_field=safe_str(row.get("是否驻外", "否")),
-                remark=safe_str(row.get("备注", "")),
-                role="member",
-                department="建筑一所"
-            )
-            db.add(user)
-            results["created"] += 1
-            
+            if not employee_id and admin_exists and name == (admin_exists.name or "").strip():
+                continue
+            fields = {
+                "gender": safe_str(row.get("性别", "")),
+                "profession": safe_str(row.get("专业方向", "")),
+                "registration": safe_str(row.get("注册情况", "")),
+                "title": safe_str(row.get("职称情况", "")),
+                "birth_date": safe_str(row.get("出生年月", "")),
+                "work_start_date": safe_str(row.get("参加工作时间", "")),
+                "project_types": parse_project_types(safe_str(row.get("擅长项目类型", ""))),
+                "experience": safe_str(row.get("历史项目经验", "")),
+                "is_field": safe_str(row.get("是否驻外", "否")),
+                "remark": safe_str(row.get("备注", ""))
+            }
+            existing = existing_by_eid.get(employee_id) if employee_id else None
+            if not existing and name:
+                candidates = existing_by_name.get(name, [])
+                if candidates:
+                    existing = candidates[0]
+            if existing:
+                existing.name = name
+                for key, value in fields.items():
+                    setattr(existing, key, value)
+                if not existing.employee_id and employee_id:
+                    existing.employee_id = employee_id
+                results["updated"] += 1
+            else:
+                username = generate_username(name, db, used_usernames)
+                user = models.User(
+                    username=username,
+                    password_hash=get_password_hash("123456"),
+                    name=name,
+                    employee_id=employee_id,
+                    role="member",
+                    department="建筑一所",
+                    **fields
+                )
+                db.add(user)
+                db.flush()
+                if user.employee_id:
+                    existing_by_eid[str(user.employee_id).strip()] = user
+                existing_by_name.setdefault(user.name or "", []).append(user)
+                results["created"] += 1
         except Exception as e:
             results["failed"] += 1
             results["errors"].append(f"第{index+2}行: {str(e)}")
-    
-    print('=== BEFORE COMMIT ===')
+
     db.commit()
-    print('=== AFTER COMMIT ===')
     return results
 
 
@@ -248,10 +267,20 @@ def import_workload_from_excel(file_content, db):
 
     headers = [str(h).strip() for h in df.columns]
 
+    col_aliases = {
+        "规模": ["项目规模"],
+        "专业负责人": ["专业负责", "专业审核"],
+        "项目负责人": ["负责人"],
+    }
+
     def _find_col(name):
         for i, h in enumerate(headers):
             if h == name:
                 return i
+        for alias in col_aliases.get(name, []):
+            for i, h in enumerate(headers):
+                if h == alias:
+                    return i
         return -1
 
     new_mode = _find_col("项目编号") >= 0
@@ -293,11 +322,27 @@ def import_workload_from_excel(file_content, db):
             return [x.strip() for x in s.replace("、", ",").replace("，", ",").replace("；", ",").replace(";", ",").split(",") if x.strip()]
 
         role_cols = ["设计", "复核", "专业负责人", "院审", "总体审核", "集团审核"]
+        emp_by_name = {}
+        for _u in db.query(models.User).filter(
+            models.User.is_active == True,
+            models.User.employee_id.isnot(None),
+            models.User.employee_id != ""
+        ).all():
+            if _u.name:
+                emp_by_name[_u.name.strip()] = _u
+
+        def _resolve_member(name):
+            u = emp_by_name.get(name.strip())
+            if u:
+                return {"employee_id": u.employee_id or "", "department": u.department or "", "note": ""}
+            return {"employee_id": "", "department": "", "note": "院外人员"}
+
         for idx, row in df.iterrows():
             try:
                 code = _cell(row, "项目编号")
                 if not code:
                     continue
+                project_name = _cell(row, "项目名称")
                 project_type = _cell(row, "项目类型")
                 scale = _cell(row, "规模")
                 stage = _cell(row, "阶段")
@@ -310,7 +355,9 @@ def import_workload_from_excel(file_content, db):
                 existing = db.query(models.WorkloadRecord).filter(models.WorkloadRecord.project_code == code).first()
                 if existing:
                     existing.project_code = code
-                    if not existing.project_name:
+                    if project_name:
+                        existing.project_name = project_name
+                    elif not existing.project_name:
                         existing.project_name = code
                     if project_type:
                         existing.project_type = project_type
@@ -328,7 +375,7 @@ def import_workload_from_excel(file_content, db):
                 else:
                     rec = models.WorkloadRecord(
                         project_code=code,
-                        project_name=code,
+                        project_name=project_name or code,
                         project_type=project_type,
                         scale=scale,
                         stage=stage,
@@ -344,7 +391,7 @@ def import_workload_from_excel(file_content, db):
                 if not project:
                     project = models.Project(
                         project_code=code,
-                        project_name=code,
+                        project_name=project_name or code,
                         project_type=project_type or "其它",
                         area=_parse_area(scale),
                         start_date=start_date,
@@ -356,6 +403,8 @@ def import_workload_from_excel(file_content, db):
                     db.add(project)
                     db.flush()
                 else:
+                    if project_name:
+                        project.project_name = project_name
                     if project_type:
                         project.project_type = project_type
                     if start_date:
@@ -370,18 +419,24 @@ def import_workload_from_excel(file_content, db):
                 for role_col in role_cols:
                     names = _split_names(_cell(row, role_col))
                     for name in names:
+                        info = _resolve_member(name)
                         exists = db.query(models.ProjectMember).filter(
                             models.ProjectMember.project_id == project.id,
-                            models.ProjectMember.employee_id == name,
+                            models.ProjectMember.employee_name == name,
                             models.ProjectMember.role == role_col
                         ).first()
-                        if not exists:
+                        if exists:
+                            exists.employee_id = info["employee_id"]
+                            exists.department = info["department"]
+                            exists.note = info["note"]
+                        else:
                             db.add(models.ProjectMember(
                                 project_id=project.id,
-                                employee_id=name,
+                                employee_id=info["employee_id"],
                                 employee_name=name,
-                                department="",
-                                role=role_col
+                                department=info["department"],
+                                role=role_col,
+                                note=info["note"]
                             ))
             except Exception as e:
                 results["failed"] += 1
@@ -480,12 +535,12 @@ def generate_workload_template():
     from io import BytesIO
     output = BytesIO()
     columns = [
-        "项目编号", "项目类型", "规模", "阶段", "开始日期", "预计结束", "计划工天", "项目负责人",
+        "项目编号", "项目名称", "项目类型", "规模", "阶段", "开始日期", "预计结束", "计划工天", "项目负责人",
         "设计", "复核", "专业负责人", "院审", "总体审核", "集团审核"
     ]
     df = pd.DataFrame(columns=columns)
     df.loc[0] = [
-        "DT2026-001-01", "大铁", "50000㎡", "初步设计", "2026-01-01", "2026-12-31", "120", "张三",
+        "DT2026-001-01", "示例项目", "大铁", "50000㎡", "初步设计", "2026-01-01", "2026-12-31", "120", "张三",
         "李四、王五", "赵六", "孙七", "", "", ""
     ]
     with pd.ExcelWriter(output, engine='openpyxl') as writer:

@@ -7,6 +7,28 @@ from datetime import datetime, date
 import sqlite3
 import json
 
+def _round_workdays(v):
+    try:
+        f = float(v or 0)
+    except Exception:
+        return 0
+    return int(f + 0.5) if f >= 0 else int(f - 0.5)
+
+PROJECT_TYPE_CODE_MAP = {
+    "站房": "ZF", "枢纽": "SN", "大铁": "DT", "轨交": "GJ", "民建": "MJ",
+    "改造": "GZ", "援外": "YW", "BIM": "BI", "方案": "FA", "建模": "JM",
+    "咨询": "ZX", "总包": "ZB"
+}
+
+def auto_project_code(db: Session, project_type: str):
+    prefix = PROJECT_TYPE_CODE_MAP.get(project_type or "", (project_type or "")[:2].upper())
+    now = date.today()
+    base = "%s-%04d-%02d-%02d" % (prefix, now.year, now.month, now.day)
+    count = db.query(models.Project).filter(models.Project.project_code.like(base + "%")).count()
+    if not count:
+        return base
+    return "%s-%02d" % (base, count + 1)
+
 # 用户操作
 def get_user_by_username(db: Session, username: str):
     return db.query(models.User).filter(models.User.username == username).first()
@@ -58,7 +80,7 @@ def get_projects(db: Session) -> List[models.Project]:
     db_path = os.path.join(os.path.dirname(__file__), "building_institute.db")
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    rows = conn.execute("SELECT id, project_code, project_name, project_type, area, status, start_date, planned_end_date, actual_end_date, planned_man_days, actual_man_days, alert_level, description, work_rounds, round_reason, created_by, project_leader_id, current_stage, drawing_list, is_official FROM projects").fetchall()
+    rows = conn.execute("SELECT id, project_code, group_code, project_name, project_type, area, status, start_date, planned_end_date, actual_end_date, planned_man_days, actual_man_days, alert_level, description, work_rounds, round_reason, created_by, project_leader_id, current_stage, drawing_list, is_official FROM projects").fetchall()
     conn.close()
     result = []
     for r in rows:
@@ -70,6 +92,31 @@ def get_projects(db: Session) -> List[models.Project]:
                 row["drawing_list"] = []
         row["is_official"] = bool(row.get("is_official"))
         result.append(row)
+
+    latest_assessment = db.query(models.PerformanceAssessment).order_by(
+        models.PerformanceAssessment.created_at.desc(),
+        models.PerformanceAssessment.id.desc()
+    ).first()
+    wd_by_name = {}
+    if latest_assessment:
+        for rec in db.query(models.WorkdayRecord).filter(
+            models.WorkdayRecord.assessment_id == latest_assessment.id
+        ).all():
+            key = rec.project_name or ""
+            wd_by_name.setdefault(key, []).append(rec)
+
+    def _pick_record(recs, leader_id):
+        if not recs:
+            return None
+        return max(recs, key=lambda r: r.id)
+
+    for row in result:
+        recs = wd_by_name.get(row.get("project_name") or "", [])
+        if not recs:
+            recs = wd_by_name.get(row.get("project_code") or "", [])
+        rec = _pick_record(recs, row.get("project_leader_id"))
+        row["basic_work_days"] = _round_workdays(rec.A) if rec and rec.A is not None else None
+        row["final_work_days"] = _round_workdays(rec.G) if rec and rec.G is not None else None
     return result
 
 def _sync_project_to_workload(db: Session, pdata: dict, user_id: int):
@@ -173,7 +220,10 @@ def sync_all_projects_to_workload(db: Session):
 
 
 def create_project(db: Session, data: schemas.ProjectCreate, user_id: int):
-    project = models.Project(**data.model_dump(), created_by=user_id, project_leader_id=user_id)
+    payload = data.model_dump()
+    if not (payload.get("project_code") or "").strip():
+        payload["project_code"] = auto_project_code(db, payload.get("project_type") or "")
+    project = models.Project(**payload, created_by=user_id, project_leader_id=user_id)
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -193,6 +243,11 @@ def _remove_project_from_workload(db: Session, project: models.Project):
     if record:
         db.delete(record)
 
+def _remove_project_workday_records(db: Session, project: models.Project):
+    pname = (project.project_name or "").strip()
+    if pname:
+        db.query(models.WorkdayRecord).filter(models.WorkdayRecord.project_name == pname).delete(synchronize_session=False)
+
 def get_project(db: Session, project_id: int):
     return db.query(models.Project).filter(models.Project.id == project_id).first()
 
@@ -203,12 +258,227 @@ def delete_project(db: Session, project_id: int) -> bool:
     if not project:
         return False
     # Delete related members first
-    db.query(models.ProjectMember).filter(models.ProjectMember.project_id == project_id).delete()
-    db.query(models.Task).filter(models.Task.project_id == project_id).delete()
+    db.query(models.ProjectMember).filter(models.ProjectMember.project_id == project_id).delete(synchronize_session=False)
+    db.query(models.Task).filter(models.Task.project_id == project_id).delete(synchronize_session=False)
+    db.query(models.ProjectMemberScore).filter(models.ProjectMemberScore.project_id == project_id).delete(synchronize_session=False)
+    db.query(models.ProjectWorkdayAlloc).filter(models.ProjectWorkdayAlloc.project_id == project_id).delete(synchronize_session=False)
     _remove_project_from_workload(db, project)
+    _remove_project_workday_records(db, project)
     db.delete(project)
     db.commit()
     return True
+
+def clear_project_library(db: Session):
+    """清空整个项目库：项目、工作量记录及项目相关的工天数据。"""
+    projects = db.query(models.Project).all()
+    project_names = set()
+    for p in projects:
+        if p.project_name and p.project_name.strip():
+            project_names.add(p.project_name.strip())
+        if p.project_code and p.project_code.strip():
+            project_names.add(p.project_code.strip())
+
+    db.query(models.ProjectMember).delete(synchronize_session=False)
+    db.query(models.ProjectStageProgress).delete(synchronize_session=False)
+    db.query(models.Task).delete(synchronize_session=False)
+    db.query(models.WorkloadHistory).delete(synchronize_session=False)
+    db.query(models.QualityAssessment).delete(synchronize_session=False)
+    db.query(models.ProjectMemberScore).delete(synchronize_session=False)
+    db.query(models.ProjectWorkdayAlloc).delete(synchronize_session=False)
+    db.query(models.WorkloadRecord).delete(synchronize_session=False)
+    if project_names:
+        db.query(models.WorkdayRecord).filter(
+            models.WorkdayRecord.project_name.in_(list(project_names))
+        ).delete(synchronize_session=False)
+    db.query(models.Project).delete(synchronize_session=False)
+    db.commit()
+    return {"projects": len(projects)}
+
+def repair_legacy_data(db: Session):
+    """修复历史遗留数据：工天重复、成员编号为姓名、项目空阶段/暂估工天。"""
+    result = {"workday_duplicates": 0, "members_repaired": 0, "projects_filled": 0}
+
+    groups = db.query(
+        models.WorkdayRecord.assessment_id,
+        models.WorkdayRecord.project_name,
+        func.max(models.WorkdayRecord.id).label("keep_id")
+    ).group_by(
+        models.WorkdayRecord.assessment_id,
+        models.WorkdayRecord.project_name
+    ).all()
+    keep_ids = [g.keep_id for g in groups]
+    if keep_ids:
+        dup = db.query(models.WorkdayRecord).filter(
+            ~models.WorkdayRecord.id.in_(keep_ids)
+        ).delete(synchronize_session=False)
+        result["workday_duplicates"] = dup
+
+    users = db.query(models.User).filter(
+        models.User.is_active == True,
+        models.User.employee_id.isnot(None),
+        models.User.employee_id != ""
+    ).all()
+    user_by_name = {}
+    for u in users:
+        if u.name:
+            user_by_name.setdefault(u.name.strip(), u)
+
+    for m in db.query(models.ProjectMember).all():
+        eid = (m.employee_id or "").strip()
+        ename = (m.employee_name or "").strip()
+        if eid and (eid == ename or eid.startswith("EXT_")):
+            u = user_by_name.get(ename)
+            if u:
+                m.employee_id = u.employee_id
+                m.department = u.department or m.department
+            else:
+                m.employee_id = ""
+                if not (m.note or "").strip():
+                    m.note = "院外人员"
+            result["members_repaired"] += 1
+
+    for p in db.query(models.Project).all():
+        wl = None
+        if p.project_code:
+            wl = db.query(models.WorkloadRecord).filter(models.WorkloadRecord.project_code == p.project_code).first()
+        if not wl:
+            wl = db.query(models.WorkloadRecord).filter(models.WorkloadRecord.project_name == p.project_name).first()
+        changed = False
+        if not p.current_stage and wl and wl.stage:
+            p.current_stage = wl.stage
+            changed = True
+        if not p.planned_man_days and wl and wl.calculated_work_days:
+            p.planned_man_days = wl.calculated_work_days
+            changed = True
+        if changed:
+            result["projects_filled"] += 1
+
+    for p in db.query(models.Project).all():
+        _sync_project_leader(db, p.id)
+
+    db.commit()
+    return result
+
+def get_personal_workday_summary(db: Session, assessment_id: int):
+    """返回考核期内每个员工的总工天（与考核结果同口径）。"""
+    employees = db.query(models.User).filter(
+        models.User.is_active == True,
+        models.User.employee_id.isnot(None),
+        models.User.employee_id != ""
+    ).all()
+    workdays_all = db.query(models.WorkdayRecord).filter(
+        models.WorkdayRecord.assessment_id == assessment_id
+    ).all()
+
+    def _round_int(v):
+        try:
+            f = float(v or 0)
+        except Exception:
+            f = 0
+        return int(f + 0.5) if f >= 0 else int(f - 0.5)
+
+    def _allocate_days(pool, pcts):
+        out = []
+        if pool <= 0 or not pcts:
+            return [0] * len(pcts or [])
+        total_pct = sum(max(0, p or 0) for p in pcts)
+        if total_pct <= 0:
+            return [0] * len(pcts)
+        exact = [pool * max(0, p or 0) / total_pct for p in pcts]
+        floors = [int(x) for x in exact]
+        remaining = pool - sum(floors)
+        order = sorted(range(len(exact)), key=lambda i: (exact[i] - floors[i], -i), reverse=True)
+        for i in range(min(remaining, len(order))):
+            floors[order[i]] += 1
+        return floors
+
+    projects = db.query(models.Project).all()
+    project_by_id = {p.id: p for p in projects}
+    project_id_by_name = {p.project_name: p.id for p in projects if p.project_name}
+    project_members = db.query(models.ProjectMember).all()
+    pm_by_id = {m.id: m for m in project_members}
+    employee_by_id = {u.employee_id: u.id for u in employees}
+
+    allocs = db.query(models.ProjectWorkdayAlloc).all()
+    parsed_allocs = []
+    allocated_project_ids = set()
+    for a in allocs:
+        try:
+            obj = json.loads(a.data or "{}")
+        except Exception:
+            continue
+        members = obj.get("members") or []
+        leader_pct = obj.get("leaderPct", 0.05) or 0
+        if leader_pct <= 1:
+            leader_pct = leader_pct * 100
+        parsed_allocs.append({
+            "id": a.id,
+            "project_id": a.project_id,
+            "leader_pct": float(leader_pct),
+            "members": members,
+            "obj": obj
+        })
+        allocated_project_ids.add(a.project_id)
+
+    alloc_personal = {}
+    for item in parsed_allocs:
+        project = project_by_id.get(item["project_id"])
+        if not project:
+            continue
+        candidates = [r for r in workdays_all if r.project_name == project.project_name]
+        chosen = max(candidates, key=lambda r: r.id) if candidates else None
+        total_g = _round_int(chosen.G) if chosen else 0
+
+        if total_g > 0 and project.project_leader_id:
+            leader_share = _round_int(total_g * item["leader_pct"] / 100.0)
+            leader_share = min(leader_share, total_g)
+            remaining = total_g - leader_share
+            alloc_personal[project.project_leader_id] = alloc_personal.get(project.project_leader_id, 0) + leader_share
+        else:
+            remaining = total_g
+
+        members = [m for m in item["members"] if m.get("id")]
+        pcts = [float(m.get("pct") or 0) for m in members]
+        days = _allocate_days(remaining, pcts)
+        for m, day in zip(members, days):
+            pm = pm_by_id.get(m.get("id"))
+            if not pm or not pm.employee_id:
+                continue
+            uid = employee_by_id.get(pm.employee_id)
+            if uid is None:
+                continue
+            if day > 0:
+                alloc_personal[uid] = alloc_personal.get(uid, 0) + day
+
+        item["obj"]["members"] = item["members"]
+        alloc_row = db.query(models.ProjectWorkdayAlloc).filter(
+            models.ProjectWorkdayAlloc.id == item["id"]
+        ).first()
+        if alloc_row:
+            alloc_row.data = json.dumps(item["obj"], ensure_ascii=False)
+
+    totals = {uid: _round_int(days) for uid, days in alloc_personal.items()}
+    for r in workdays_all:
+        if not r.user_id:
+            continue
+        pid = project_id_by_name.get(r.project_name or "")
+        if pid in allocated_project_ids:
+            continue
+        totals[r.user_id] = totals.get(r.user_id, 0) + _round_int(r.G or 0)
+
+    db.commit()
+    result = []
+    for u in employees:
+        result.append({
+            "user_id": u.id,
+            "name": u.name,
+            "employee_id": u.employee_id,
+            "profession": u.profession or "",
+            "department": u.department or "",
+            "total_workdays": totals.get(u.id, 0)
+        })
+    result.sort(key=lambda x: (-x["total_workdays"], x["name"] or ""))
+    return result
 
 def get_tasks_by_project(db: Session, project_id: int) -> List[models.Task]:
     return db.query(models.Task).filter(models.Task.project_id == project_id).all()
@@ -546,7 +816,25 @@ def get_workday_records(db: Session, assessment_id: int):
     return result
 
 def create_workday_record(db: Session, data: dict, submitted_by: int):
-    G = data["A"] * data["B"] * data["C"] * data["D"] * data["E"] * data["F"]
+    G = _round_workdays(data["A"] * data["B"] * data["C"] * data["D"] * data["E"] * data["F"])
+    existing = db.query(models.WorkdayRecord).filter(
+        models.WorkdayRecord.assessment_id == data["assessment_id"],
+        models.WorkdayRecord.project_name == data.get("project_name")
+    ).first()
+    if existing:
+        existing.user_id = data["user_id"]
+        existing.project_type = data.get("project_type")
+        existing.A = data["A"]
+        existing.B = data["B"]
+        existing.C = data["C"]
+        existing.D = data["D"]
+        existing.E = data["E"]
+        existing.F = data["F"]
+        existing.G = G
+        existing.submitted_by = submitted_by
+        db.commit()
+        db.refresh(existing)
+        return existing
     record = models.WorkdayRecord(
         assessment_id=data["assessment_id"], user_id=data["user_id"],
         project_name=data.get("project_name"), project_type=data.get("project_type"),
@@ -632,15 +920,116 @@ def calculate_assessment_results(db: Session, assessment_id: int):
     scores_all = db.query(models.PerformanceScore).filter(models.PerformanceScore.assessment_id == assessment_id).all()
     workdays_all = db.query(models.WorkdayRecord).filter(models.WorkdayRecord.assessment_id == assessment_id).all()
 
+    def _round_int(v):
+        try:
+            f = float(v or 0)
+        except Exception:
+            f = 0
+        return int(f + 0.5) if f >= 0 else int(f - 0.5)
+
+    def _allocate_days(pool, pcts):
+        out = []
+        if pool <= 0 or not pcts:
+            return [0] * len(pcts or [])
+        total_pct = sum(max(0, p or 0) for p in pcts)
+        if total_pct <= 0:
+            return [0] * len(pcts)
+        exact = [pool * max(0, p or 0) / total_pct for p in pcts]
+        floors = [int(x) for x in exact]
+        remaining = pool - sum(floors)
+        order = sorted(range(len(exact)), key=lambda i: (exact[i] - floors[i], -i), reverse=True)
+        for i in range(min(remaining, len(order))):
+            floors[order[i]] += 1
+        return floors
+
+    projects = db.query(models.Project).all()
+    project_by_id = {p.id: p for p in projects}
+    project_id_by_name = {p.project_name: p.id for p in projects if p.project_name}
+    project_members = db.query(models.ProjectMember).all()
+    pm_by_id = {m.id: m for m in project_members}
+    employee_by_id = {u.employee_id: u.id for u in employees}
+
+    allocs = db.query(models.ProjectWorkdayAlloc).all()
+    parsed_allocs = []
+    allocated_project_ids = set()
+    for a in allocs:
+        try:
+            obj = json.loads(a.data or "{}")
+        except Exception:
+            continue
+        members = obj.get("members") or []
+        leader_pct = obj.get("leaderPct", 0.05) or 0
+        if leader_pct <= 1:
+            leader_pct = leader_pct * 100
+        parsed_allocs.append({
+            "id": a.id,
+            "project_id": a.project_id,
+            "leader_pct": float(leader_pct),
+            "members": members,
+            "obj": obj
+        })
+        allocated_project_ids.add(a.project_id)
+
+    alloc_personal = {}
+    for item in parsed_allocs:
+        project = project_by_id.get(item["project_id"])
+        if not project:
+            continue
+        candidates = [r for r in workdays_all if r.project_name == project.project_name]
+        chosen = max(candidates, key=lambda r: r.id) if candidates else None
+        total_g = _round_int(chosen.G) if chosen else 0
+
+        if total_g > 0 and project.project_leader_id:
+            leader_share = _round_int(total_g * item["leader_pct"] / 100.0)
+            leader_share = min(leader_share, total_g)
+            remaining = total_g - leader_share
+            alloc_personal[project.project_leader_id] = alloc_personal.get(project.project_leader_id, 0) + leader_share
+        else:
+            remaining = total_g
+
+        members = [m for m in item["members"] if m.get("id")]
+        pcts = [float(m.get("pct") or 0) for m in members]
+        days = _allocate_days(remaining, pcts)
+        for m, day in zip(members, days):
+            pm = pm_by_id.get(m.get("id"))
+            if not pm or not pm.employee_id:
+                continue
+            uid = employee_by_id.get(pm.employee_id)
+            if uid is None:
+                continue
+            if day > 0:
+                alloc_personal[uid] = alloc_personal.get(uid, 0) + day
+
+        item["obj"]["members"] = item["members"]
+        alloc_row = db.query(models.ProjectWorkdayAlloc).filter(
+            models.ProjectWorkdayAlloc.id == item["id"]
+        ).first()
+        if alloc_row:
+            alloc_row.data = json.dumps(item["obj"], ensure_ascii=False)
+
+    alloc_by_uid = {}
+    for uid, days in alloc_personal.items():
+        alloc_by_uid[uid] = _round_int(days)
+
+    fallback_by_uid = {}
+    for r in workdays_all:
+        if not r.user_id:
+            continue
+        pid = project_id_by_name.get(r.project_name or "")
+        if pid in allocated_project_ids:
+            continue
+        fallback_by_uid[r.user_id] = fallback_by_uid.get(r.user_id, 0) + _round_int(r.G or 0)
+
     # Clear old results
     db.query(models.AssessmentResult).filter(models.AssessmentResult.assessment_id == assessment_id).delete()
 
-    total_all_workdays = sum(r.G or 0 for r in workdays_all)
+    total_all_workdays = sum(alloc_by_uid.values()) + sum(fallback_by_uid.values())
 
     results = []
     for emp in employees:
         emp_scores = [s for s in scores_all if s.target_user_id == emp.id]
-        emp_workdays = sum(r.G or 0 for r in workdays_all if r.user_id == emp.id)
+        emp_workdays = alloc_by_uid.get(emp.id, 0)
+        emp_workdays += fallback_by_uid.get(emp.id, 0)
 
         director_s = [s for s in emp_scores if s.evaluator_role == "director"]
         deputy_s = [s for s in emp_scores if s.evaluator_role == "deputy_director"]
@@ -659,7 +1048,7 @@ def calculate_assessment_results(db: Session, assessment_id: int):
         avg_et = _avg_category("emergency_task", all_scores_for_cat)
         avg_ec = _avg_category("extra_contribution", all_scores_for_cat)
         # Workday output = personal workdays / max workdays (normalized to 0-100)
-        all_emp_workdays = [sum(r.G or 0 for r in workdays_all if r.user_id == u.id) for u in employees]
+        all_emp_workdays = [alloc_by_uid.get(u.id, 0) + fallback_by_uid.get(u.id, 0) for u in employees]
         max_wd = max(all_emp_workdays) if all_emp_workdays else 1
         avg_wdo = (emp_workdays / max_wd * 100) if max_wd > 0 else 0
 
@@ -962,6 +1351,21 @@ def get_project_members(db: Session, project_id: int) -> List[dict]:
         "created_at": m.created_at
     } for m in members]
 
+def _sync_project_leader(db: Session, project_id: int):
+    """让项目负责人字段与项目成员中的“项目负责人”保持一致。"""
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return
+    leader_member = db.query(models.ProjectMember).filter(
+        models.ProjectMember.project_id == project_id,
+        models.ProjectMember.role == "项目负责人"
+    ).order_by(models.ProjectMember.id).first()
+    if leader_member and leader_member.employee_id:
+        leader_user = db.query(models.User).filter(models.User.employee_id == leader_member.employee_id).first()
+        project.project_leader_id = leader_user.id if leader_user else None
+    else:
+        project.project_leader_id = None
+
 def add_project_member(db: Session, project_id: int, data: dict):
     member = models.ProjectMember(
         project_id=project_id,
@@ -977,6 +1381,7 @@ def add_project_member(db: Session, project_id: int, data: dict):
     db.refresh(member)
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if project:
+        _sync_project_leader(db, project_id)
         sync_project_to_workload(db, project)
         db.commit()
     return {
@@ -1000,12 +1405,6 @@ def update_project_member(db: Session, project_id: int, member_id: int, data: di
         return None
     if "role" in data:
         member.role = data["role"]
-        if data["role"] == "项目负责人":
-            _u = db.query(models.User).filter(models.User.employee_id == member.employee_id).first()
-            if _u:
-                _p = db.query(models.Project).filter(models.Project.id == project_id).first()
-                if _p:
-                    _p.project_leader_id = _u.id
     if "note" in data:
         member.note = data["note"]
     if "stage_status" in data:
@@ -1014,6 +1413,7 @@ def update_project_member(db: Session, project_id: int, member_id: int, data: di
     db.refresh(member)
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if project:
+        _sync_project_leader(db, project_id)
         sync_project_to_workload(db, project)
         db.commit()
     return {
@@ -1045,6 +1445,7 @@ def remove_project_member(db: Session, project_id: int, member_id: int) -> bool:
     db.commit()
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if project:
+        _sync_project_leader(db, project_id)
         sync_project_to_workload(db, project)
         db.commit()
     return True
@@ -1219,6 +1620,8 @@ def calc_personal_performance(db: Session, assessment_id: int):
 # ========== 项目建立申请 CRUD ==========
 
 def create_project_request(db: Session, data: dict, user_id: int):
+    if not (data.get("project_code") or "").strip():
+        data["project_code"] = auto_project_code(db, data.get("project_type") or "")
     req = models.ProjectRequest(**data, requested_by=user_id, status="pending")
     db.add(req)
     db.commit()
@@ -1229,6 +1632,7 @@ def create_project_request(db: Session, data: dict, user_id: int):
     proj = models.Project(
         project_name=req.project_name,
         project_code=req.project_code or "",
+        group_code=req.group_code or "",
         project_type=req.project_type,
         area=req.area,
         status="planning",
@@ -1275,6 +1679,7 @@ def get_project_requests(db: Session, status: str = None, user_id: int = None):
         out.append({
             "id": r.id, "project_id": r.project_id, "project_name": r.project_name, "project_type": r.project_type,
             "area": r.area, "stage": r.stage, "start_date": r.start_date, "project_code": r.project_code or "",
+            "group_code": r.group_code or "",
             "description": r.description, "drawing_list": r.drawing_list or [],
             "work_rounds": r.work_rounds or 1, "round_reason": r.round_reason,
             "planned_end_date": r.planned_end_date, "planned_man_days": r.planned_man_days,
@@ -1309,6 +1714,7 @@ def approve_project_request(db: Session, request_id: int, reviewer_id: int):
     if not proj:
         proj = models.Project(
             project_name=req.project_name, project_code=req.project_code or "", project_type=req.project_type,
+            group_code=req.group_code or "",
             area=req.area, status="planning", start_date=_start,
             planned_end_date=_end,
             planned_man_days=req.planned_man_days,
@@ -1325,6 +1731,7 @@ def approve_project_request(db: Session, request_id: int, reviewer_id: int):
     proj.is_official = True
     proj.project_name = req.project_name
     proj.project_code = req.project_code or proj.project_code
+    proj.group_code = req.group_code or proj.group_code
     proj.project_type = req.project_type
     proj.area = req.area
     proj.description = req.description
@@ -1372,6 +1779,7 @@ def reject_project_request(db: Session, request_id: int, reviewer_id: int):
             db.query(models.Task).filter(models.Task.project_id == proj.id).delete(synchronize_session=False)
             db.query(models.ProjectMemberScore).filter(models.ProjectMemberScore.project_id == proj.id).delete(synchronize_session=False)
             db.query(models.ProjectWorkdayAlloc).filter(models.ProjectWorkdayAlloc.project_id == proj.id).delete(synchronize_session=False)
+            _remove_project_workday_records(db, proj)
             db.delete(proj)
     req.status = "rejected"
     req.reviewer_id = reviewer_id

@@ -153,7 +153,6 @@ const authH = { Authorization: "Bearer " + tk }
 
 onMounted(async () => {
   try {
-    try { await api.post("/projects/sync-library") } catch(e) { console.error("sync library error:", e) }
     const [wlRes, projRes] = await Promise.all([
       api.get("/workload-records"),
       api.get("/projects")
@@ -217,7 +216,7 @@ async function handleEmpImport(ev) {
   if (!file) return
   const fd = new FormData(); fd.append("file", file)
   try {
-    const res = await fetch("http://localhost:8000/api/employees/import", { method: "POST", headers: authH, body: fd })
+    const res = await fetch("/api/employees/import", { method: "POST", headers: authH, body: fd })
     const r = await res.json()
     let m = "导入完成！\n新增: " + r.created + " 条"
     if (r.updated > 0) m += "\n更新: " + r.updated + " 条"
@@ -231,7 +230,7 @@ async function handleEmpImport(ev) {
 
 async function downloadEmpTemplate() {
   try {
-    const res = await fetch("http://localhost:8000/api/employees/template/download", { headers: authH })
+    const res = await fetch("/api/employees/template/download", { headers: authH })
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
@@ -260,17 +259,17 @@ async function handleWlDedup() {
 }
 
 async function handleWlClearAll() {
-  if (!confirm("确定清空所有工作量记录吗？")) return
+  if (!confirm("确定清空整个项目库吗？这会删除所有项目和工天记录，不可恢复！")) return
   try {
     await api.delete("/workload-records/all")
     workloads.value = []
-    wlImportResult.value = { type: "success", msg: "已清空所有记录" }
+    wlImportResult.value = { type: "success", msg: "项目库已清空" }
   } catch(e) { wlImportResult.value = { type: "error", msg: "清空失败" } }
 }
 
 async function downloadWlTemplate() {
   try {
-    const res = await fetch("http://localhost:8000/api/workload-records/template/download", { headers: authH })
+    const res = await fetch("/api/workload-records/template/download", { headers: authH })
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
@@ -281,7 +280,7 @@ async function downloadWlTemplate() {
 
 async function exportWlData() {
   try {
-    const res = await fetch("http://localhost:8000/api/workload-records/export", { headers: authH })
+    const res = await fetch("/api/workload-records/export", { headers: authH })
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
@@ -295,7 +294,7 @@ async function handleWlImport(ev) {
   if (!file) return
   const fd = new FormData(); fd.append("file", file)
   try {
-    const res = await fetch("http://localhost:8000/api/workload-records/import", { method: "POST", headers: authH, body: fd })
+    const res = await fetch("/api/workload-records/import", { method: "POST", headers: authH, body: fd })
     const r = await res.json()
     let m = "导入完成！\n新增: " + (r.created || 0) + " 条"
     wlImportResult.value = { type: "success", msg: m }
